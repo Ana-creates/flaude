@@ -1,0 +1,63 @@
+{
+  "name": "flaude",
+  "version": "1.0.0",
+  "description": "AI design assistant for Figma — generate production-ready designs with Claude or OpenAI",
+  "license": "MIT",
+  "scripts": {
+    "build": "build-figma-plugin --typecheck --minify",
+    "watch": "build-figma-plugin --typecheck --watch",
+    "dev": "build-figma-plugin --typecheck --watch",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "figma-plugin": {
+    "id": "1599896144665000376",
+    "name": "Flaude",
+    "editorType": [
+      "figma",
+      "figjam"
+    ],
+    "main": "src/plugin/main.ts",
+    "ui": "src/ui/index.tsx",
+    "capabilities": [],
+    "permissions": [
+      "currentuser"
+    ],
+    "networkAccess": {
+      "allowedDomains": [
+        "https://api.anthropic.com",
+        "https://api.openai.com",
+        "https://lrgwkvmiihatpfiesima.supabase.co",
+        "https://fonts.googleapis.com",
+        "https://fonts.gstatic.com"
+      ],
+      "devAllowedDomains": [
+        "ws://localhost:9876"
+      ]
+    }
+  },
+  "dependencies": {
+    "@create-figma-plugin/ui": "^4.0.3",
+    "@create-figma-plugin/utilities": "^4.0.3",
+    "preact": "^10.28.2"
+  },
+  "devDependencies": {
+    "@create-figma-plugin/build": "^4.0.3",
+    "@create-figma-plugin/tsconfig": "^4.0.3",
+    "@eslint/js": "^9.39.2",
+    "@figma/plugin-typings": "^1.122.0",
+    "@playwright/test": "^1.58.0",
+    "@types/node": "^25.0.10",
+    "eslint": "^9.39.2",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.53.1",
+    "vitest": "^4.0.18"
+  }
+}
