@@ -10,9 +10,12 @@ import { SYSTEM_PROMPTS } from '../shared/prompts';
 import { DEFAULT_MODEL } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { checkProSubscription } from './api/supabase';
+import { mcpClient } from './mcp/websocket-client';
 import type { ChatMessage, SelectionContext, QuickActionType, Settings, ClaudeModel, KnowledgeBase, KnowledgeCategory, License } from '../shared/types';
 import './styles/globals.css';
 import mascotUrl from './assets/mascot.png';
+
+type MCPStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'auth_failed';
 
 type View = 'chat' | 'settings' | 'knowledge';
 
@@ -32,6 +35,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<MCPStatus>('disconnected');
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Keep track of chat history for context
   const chatHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
@@ -84,8 +89,26 @@ export function App() {
     emit('LOAD_LICENSE');
   }, []);
 
-  // Verify Pro license against Supabase on startup
+  // Track MCP connection status
   useEffect(() => {
+    mcpClient.onStatusChange((status) => {
+      setMcpStatus(status);
+      // Auto-expand when disconnected
+      if (status === 'disconnected' || status === 'error') {
+        setIsCollapsed(false);
+      }
+    });
+  }, []);
+
+  // DEV MODE: Skip Supabase verification during development
+  const DEV_MODE = true; // Set to false for production
+
+  // Verify Pro license against Supabase on startup (skip in dev mode)
+  useEffect(() => {
+    if (DEV_MODE) {
+      console.log('[Flaude] DEV MODE: Skipping license verification');
+      return;
+    }
     if (license?.plan === 'pro' && license.email) {
       checkProSubscription(license.email).then(({ isPro, verified }) => {
         if (!isPro) {
@@ -354,6 +377,60 @@ export function App() {
     setLicense(mockLicense);
   }, []);
 
+  // Collapsed view - minimal UI when MCP is connected
+  if (isCollapsed && mcpStatus === 'connected') {
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          backgroundColor: 'var(--figma-color-bg)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              backgroundColor: '#22c55e',
+              animation: 'pulse 2s ease-in-out infinite',
+            }}
+          />
+          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--figma-color-text)' }}>
+            Connected to Claude Code
+          </span>
+        </div>
+        <button
+          onClick={() => setIsCollapsed(false)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '28px',
+            height: '28px',
+            border: 'none',
+            borderRadius: '6px',
+            backgroundColor: 'var(--figma-color-bg-secondary)',
+            color: 'var(--figma-color-text-secondary)',
+            cursor: 'pointer',
+          }}
+          title="Expand plugin"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 3 21 3 21 9" />
+            <polyline points="9 21 3 21 3 15" />
+            <line x1="21" y1="3" x2="14" y2="10" />
+            <line x1="3" y1="21" x2="10" y2="14" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -397,6 +474,33 @@ export function App() {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: '6px' }}>
+            {/* Minimize button - only show when MCP is connected */}
+            {mcpStatus === 'connected' && (
+              <button
+                onClick={() => setIsCollapsed(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px',
+                  border: 'none',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                  color: '#22c55e',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                title="Minimize - MCP Connected"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => setView('knowledge')}
               style={{
