@@ -84,7 +84,7 @@ export function ChatView({
             maxWidth: '280px',
           }}
         >
-          Connect your Claude or OpenAI API key to start designing with AI directly in Figma.
+          Connect your Claude API key to start designing with AI directly in Figma.
         </div>
         <button
           onClick={onOpenSettings}
