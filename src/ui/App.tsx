@@ -378,17 +378,6 @@ export function App() {
     emit('SAVE_LICENSE', newLicense);
   }, []);
 
-  // DEBUG: Mock Pro license for testing (remove before production)
-  const handleMockProLicense = useCallback(() => {
-    const mockLicense = {
-      email: 'test@example.com',
-      key: 'mock-key-123',
-      plan: 'pro' as const,
-      activatedAt: Date.now(),
-    };
-    setLicense(mockLicense);
-  }, []);
-
   // Collapsed view - minimal UI when MCP is connected
   if (isCollapsed && mcpStatus === 'connected') {
     return (
@@ -539,29 +528,6 @@ export function App() {
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
               </svg>
             </button>
-            {/* DEBUG: Mock Pro button - remove before production */}
-            {!license && (
-              <button
-                onClick={handleMockProLicense}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '32px',
-                  height: '32px',
-                  border: '1px dashed #e86a10',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'transparent',
-                  color: '#e86a10',
-                  cursor: 'pointer',
-                  fontSize: '10px',
-                  fontWeight: 700,
-                }}
-                title="DEBUG: Activate Mock Pro License"
-              >
-                PRO
-              </button>
-            )}
             <button
               onClick={() => setView('settings')}
               style={{
