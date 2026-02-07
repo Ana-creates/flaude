@@ -7,7 +7,7 @@ import { KnowledgeBaseView } from './components/features/KnowledgeBaseView';
 import { callClaudeAPI, testClaudeConnection } from './api/claude';
 import { runAgent, type ToolCall, type ToolResult, type AgentUpdate } from '../plugin/agent/runner';
 import { SYSTEM_PROMPTS } from '../shared/prompts';
-import { DEFAULT_MODEL } from '../shared/constants/defaults';
+import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { checkProSubscription } from './api/supabase';
 import { mcpClient } from './mcp/websocket-client';
@@ -96,8 +96,20 @@ export function App() {
       // Auto-expand when disconnected
       if (status === 'disconnected' || status === 'error') {
         setIsCollapsed(false);
+        emit('RESIZE_UI', { width: UI_DIMENSIONS.width, height: UI_DIMENSIONS.height });
       }
     });
+  }, []);
+
+  // Collapse/expand handlers
+  const handleCollapse = useCallback(() => {
+    setIsCollapsed(true);
+    emit('RESIZE_UI', { width: UI_DIMENSIONS.collapsedWidth, height: UI_DIMENSIONS.collapsedHeight });
+  }, []);
+
+  const handleExpand = useCallback(() => {
+    setIsCollapsed(false);
+    emit('RESIZE_UI', { width: UI_DIMENSIONS.width, height: UI_DIMENSIONS.height });
   }, []);
 
   // DEV MODE: Skip Supabase verification during development
@@ -405,7 +417,7 @@ export function App() {
           </span>
         </div>
         <button
-          onClick={() => setIsCollapsed(false)}
+          onClick={handleExpand}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -477,7 +489,7 @@ export function App() {
             {/* Minimize button - only show when MCP is connected */}
             {mcpStatus === 'connected' && (
               <button
-                onClick={() => setIsCollapsed(true)}
+                onClick={handleCollapse}
                 style={{
                   display: 'flex',
                   alignItems: 'center',

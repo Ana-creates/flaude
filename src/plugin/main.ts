@@ -211,4 +211,9 @@ export default function () {
   on('CLOSE_PLUGIN', () => {
     figma.closePlugin();
   });
+
+  // === UI Resize handler (for collapse/expand) ===
+  on('RESIZE_UI', (payload: { width: number; height: number }) => {
+    figma.ui.resize(payload.width, payload.height);
+  });
 }

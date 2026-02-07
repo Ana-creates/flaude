@@ -12,6 +12,8 @@ export const UI_DIMENSIONS = {
   height: 560,
   minWidth: 320,
   minHeight: 400,
+  collapsedWidth: 280,
+  collapsedHeight: 44,
 } as const;
 
 export const STORAGE_KEYS = {
