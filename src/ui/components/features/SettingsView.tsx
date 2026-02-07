@@ -22,12 +22,14 @@ interface SettingsViewProps {
   analysesUsedThisMonth: number;
   isLoading: boolean;
   connectionTestResult: { success: boolean; message: string } | null;
+  mcpConnected?: boolean;
   onSaveApiKey: (key: string) => void;
   onSaveModel: (model: ClaudeModel) => void;
   onActivateLicense: (email: string) => void;
   onDeactivateLicense: () => void;
   onTestConnection: () => void;
   onBack: () => void;
+  onCollapse?: () => void;
 }
 
 export function SettingsView({
@@ -38,12 +40,14 @@ export function SettingsView({
   analysesUsedThisMonth,
   isLoading,
   connectionTestResult,
+  mcpConnected,
   onSaveApiKey,
   onSaveModel,
   onActivateLicense,
   onDeactivateLicense,
   onTestConnection,
   onBack,
+  onCollapse,
 }: SettingsViewProps) {
   const [inputValue, setInputValue] = useState(apiKey);
   const [showKey, setShowKey] = useState(false);
@@ -120,34 +124,63 @@ export function SettingsView({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
+          justifyContent: 'space-between',
           padding: '12px 16px',
           borderBottom: '1px solid var(--card-border)',
         }}
       >
-        <button
-          onClick={onBack}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '32px',
-            height: '32px',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'var(--figma-color-bg-secondary)',
-            color: 'var(--figma-color-text)',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--figma-color-text)' }}>
-          Settings
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button
+            onClick={onBack}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--figma-color-bg-secondary)',
+              color: 'var(--figma-color-text)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--figma-color-text)' }}>
+            Settings
+          </span>
+        </div>
+        {/* Minimize button - only show when MCP is connected */}
+        {mcpConnected && onCollapse && (
+          <button
+            onClick={onCollapse}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'rgba(34, 197, 94, 0.1)',
+              color: '#22c55e',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            title="Minimize - MCP Connected"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="4 14 10 14 10 20" />
+              <polyline points="20 10 14 10 14 4" />
+              <line x1="14" y1="10" x2="21" y2="3" />
+              <line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Content */}

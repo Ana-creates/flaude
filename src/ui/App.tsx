@@ -678,12 +678,14 @@ export function App() {
             analysesUsedThisMonth={analysesUsedThisMonth}
             isLoading={isLoading}
             connectionTestResult={connectionTestResult}
+            mcpConnected={mcpStatus === 'connected'}
             onSaveApiKey={handleSaveApiKey}
             onSaveModel={handleSaveModel}
             onActivateLicense={handleActivateLicense}
             onDeactivateLicense={handleDeactivateLicense}
             onTestConnection={handleTestConnection}
             onBack={() => setView('chat')}
+            onCollapse={handleCollapse}
           />
         )}
         {view === 'knowledge' && (
