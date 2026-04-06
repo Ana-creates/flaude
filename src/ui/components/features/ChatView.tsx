@@ -14,8 +14,6 @@ interface ChatViewProps {
   hasApiKey: boolean;
   selectionContext: SelectionContext | null;
   agentStatus: string | null;
-  knowledgeEntryCount?: number;
-  knowledgeTotalChars?: number;
   userEmail: string | null;
   onSaveEmail: (email: string) => void;
   onSendMessage: (message: string) => void;
@@ -29,8 +27,6 @@ export function ChatView({
   hasApiKey,
   selectionContext,
   agentStatus,
-  knowledgeEntryCount = 0,
-  knowledgeTotalChars = 0,
   userEmail,
   onSaveEmail,
   onSendMessage,
@@ -298,47 +294,6 @@ export function ChatView({
               Describe your design, use the quick actions, or upload your brand docs for context.
             </div>
 
-            {/* Knowledge Base indicator */}
-            {knowledgeEntryCount > 0 && (() => {
-              const tokens = Math.ceil(knowledgeTotalChars / 4);
-              const isLarge = knowledgeTotalChars > 20000;
-              return (
-                <div
-                  style={{
-                    marginTop: '20px',
-                    padding: '10px 16px',
-                    fontSize: '11px',
-                    backgroundColor: isLarge
-                      ? 'var(--color-warning-soft)'
-                      : 'var(--figma-color-bg-secondary)',
-                    color: isLarge
-                      ? 'var(--color-warning)'
-                      : 'var(--figma-color-text-secondary)',
-                    borderRadius: 'var(--radius-full)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                  </svg>
-                  <span>
-                    {knowledgeEntryCount} {knowledgeEntryCount === 1 ? 'entry' : 'entries'} • ~{tokens.toLocaleString()} tokens
-                  </span>
-                </div>
-              );
-            })()}
           </div>
         ) : (
           <>

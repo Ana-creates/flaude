@@ -1,23 +1,19 @@
 import { h } from 'preact';
-import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
+import { useState, useEffect, useCallback } from 'preact/hooks';
 import { on, emit } from '@create-figma-plugin/utilities';
 import { ChatView } from './components/features/ChatView';
 import { SettingsView } from './components/features/SettingsView';
-import { KnowledgeBaseView } from './components/features/KnowledgeBaseView';
-import { callClaudeAPI, testClaudeConnection } from './api/claude';
-import { runAgent, type ToolCall, type ToolResult, type AgentUpdate } from '../plugin/agent/runner';
-import { SYSTEM_PROMPTS } from '../shared/prompts';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { saveUserEmail } from './api/supabase';
 import { mcpClient } from './mcp/websocket-client';
-import type { ChatMessage, SelectionContext, QuickActionType, Settings, ClaudeModel, KnowledgeBase, KnowledgeCategory, License } from '../shared/types';
+import type { ChatMessage, SelectionContext, Settings, License } from '../shared/types';
 import './styles/globals.css';
 import mascotUrl from './assets/mascot.png';
 
 type MCPStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'auth_failed';
 
-type View = 'chat' | 'settings' | 'knowledge';
+type View = 'chat' | 'settings';
 
 export function App() {
   const [view, setView] = useState<View>('chat');
@@ -25,24 +21,12 @@ export function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [settings, setSettings] = useState<Settings>({ apiKey: '', hasApiKey: false, model: DEFAULT_MODEL });
   const [selectionContext, setSelectionContext] = useState<SelectionContext | null>(null);
-  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase>({ entries: [], lastUpdated: 0 });
   const [license, setLicense] = useState<License | null>(null);
-  const [analysesUsedThisMonth, setAnalysesUsedThisMonth] = useState(0);
-  const [connectionTestResult, setConnectionTestResult] = useState<{
-    success: boolean;
-    message: string;
-  } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
   const [mcpStatus, setMcpStatus] = useState<MCPStatus>('disconnected');
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // Keep track of chat history for context
-  const chatHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-
-  // Pending tool results - keyed by requestId
-  const pendingToolResultsRef = useRef<Map<string, (results: ToolResult[]) => void>>(new Map());
 
   // Setup event listeners for plugin communication
   useEffect(() => {
@@ -56,36 +40,20 @@ export function App() {
       setSelectionContext(context);
     });
 
-    // Tool results from plugin
-    on('TOOL_RESULTS', (payload: { requestId: string; results: ToolResult[]; error?: string }) => {
-      const resolver = pendingToolResultsRef.current.get(payload.requestId);
-      if (resolver) {
-        pendingToolResultsRef.current.delete(payload.requestId);
-        resolver(payload.results);
-      }
-    });
-
     // General errors from plugin
     on('ERROR', ({ message }: { message: string }) => {
       setError(message);
       setTimeout(() => setError(null), 5000);
     });
 
-    // Knowledge base loaded
-    on('KNOWLEDGE_BASE_LOADED', (kb: KnowledgeBase) => {
-      setKnowledgeBase(kb);
-    });
-
     // License loaded
     on('LICENSE_LOADED', (payload: { license: License | null; analysesUsedThisMonth: number }) => {
       setLicense(payload.license);
-      setAnalysesUsedThisMonth(payload.analysesUsedThisMonth);
     });
 
     // Load initial data from plugin
     emit('LOAD_SETTINGS');
     emit('GET_SELECTION_CONTEXT');
-    emit('LOAD_KNOWLEDGE_BASE');
     emit('LOAD_LICENSE');
   }, []);
 
@@ -121,223 +89,7 @@ export function App() {
     }
   }, [license?.email]);
 
-  // Execute tools via plugin messaging
-  const executeToolsViaPlugin = useCallback(async (toolCalls: ToolCall[]): Promise<ToolResult[]> => {
-    return new Promise((resolve) => {
-      const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      pendingToolResultsRef.current.set(requestId, resolve);
 
-      emit('EXECUTE_TOOLS', {
-        requestId,
-        toolCalls: toolCalls.map(tc => ({
-          id: tc.id,
-          name: tc.name,
-          input: tc.input,
-        })),
-      });
-
-      // Timeout fallback
-      setTimeout(() => {
-        if (pendingToolResultsRef.current.has(requestId)) {
-          pendingToolResultsRef.current.delete(requestId);
-          resolve(toolCalls.map(tc => ({
-            toolUseId: tc.id,
-            result: { error: 'Timeout waiting for tool execution' },
-            isError: true,
-          })));
-        }
-      }, 30000);
-    });
-  }, []);
-
-  // Show error for 5 seconds
-  const showError = useCallback((msg: string) => {
-    setError(msg);
-    setTimeout(() => setError(null), 5000);
-  }, []);
-
-  // Add message to chat
-  const addMessage = useCallback((role: 'user' | 'assistant', content: string) => {
-    const message: ChatMessage = {
-      id: `${role}-${Date.now()}`,
-      role,
-      content,
-      timestamp: Date.now(),
-    };
-    setMessages(prev => [...prev, message]);
-    chatHistoryRef.current.push({ role, content });
-  }, []);
-
-  // Handle agent status updates
-  const handleAgentUpdate = useCallback((update: AgentUpdate) => {
-    if (update.type === 'thinking' || update.type === 'tool_call' || update.type === 'tool_result') {
-      setAgentStatus(update.message);
-    } else if (update.type === 'error') {
-      showError(update.message);
-      setAgentStatus(null);
-    } else if (update.type === 'response') {
-      setAgentStatus(null);
-    }
-  }, [showError]);
-
-  // Build knowledge context string for Claude
-  const buildKnowledgeContext = useCallback(() => {
-    if (knowledgeBase.entries.length === 0) return '';
-
-    const sections: string[] = [];
-    sections.push('\n\n---\n## KNOWLEDGE BASE (App Context)\n');
-    sections.push('The following is background knowledge about this application:\n');
-
-    // Group by category
-    const byCategory = new Map<string, typeof knowledgeBase.entries>();
-    for (const entry of knowledgeBase.entries) {
-      if (!byCategory.has(entry.category)) byCategory.set(entry.category, []);
-      byCategory.get(entry.category)!.push(entry);
-    }
-
-    for (const [category, entries] of byCategory) {
-      sections.push(`\n### ${category.toUpperCase()}\n`);
-      for (const entry of entries) {
-        sections.push(`**${entry.title}**\n${entry.content}\n`);
-      }
-    }
-
-    sections.push('\n---\n\n');
-    return sections.join('');
-  }, [knowledgeBase]);
-
-  // Handle sending a chat message - API call happens HERE in UI
-  const handleSendMessage = useCallback(async (userMessage: string) => {
-    if (!settings.apiKey) {
-      showError('Please configure your Claude API key in settings.');
-      return;
-    }
-
-    // Add user message
-    addMessage('user', userMessage);
-
-    // Build context string
-    let contextStr = '';
-    if (selectionContext && selectionContext.count > 0) {
-      contextStr = `\n\n---\n**Current Selection Context:**\n${selectionContext.summary}\n- ${selectionContext.count} element(s) selected\n- Types: ${selectionContext.nodeTypes.join(', ')}\n---\n\n`;
-    }
-
-    // Call Claude API from UI
-    setIsLoading(true);
-    try {
-      const response = await callClaudeAPI(
-        settings.apiKey,
-        [...chatHistoryRef.current.slice(0, -1), { role: 'user' as const, content: contextStr + userMessage }],
-        SYSTEM_PROMPTS.chat,
-        settings.model
-      );
-      addMessage('assistant', response);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [settings.apiKey, settings.model, selectionContext, addMessage, showError]);
-
-  // Handle quick action with AGENT MODE - uses tools
-  const handleQuickAction = useCallback(async (action: QuickActionType) => {
-    if (!settings.apiKey) {
-      showError('Please configure your Claude API key in settings.');
-      return;
-    }
-
-    // Add user message showing the action
-    const actionLabels = {
-      flows: '🔀 Map User Flows',
-      validate: '✅ Validate Against Requirements',
-    };
-    addMessage('user', `[Agent Mode: ${actionLabels[action]}]`);
-
-    // Get the appropriate agent prompt
-    const agentPromptMap: Record<QuickActionType, string> = {
-      flows: SYSTEM_PROMPTS.agentFlows,
-      validate: SYSTEM_PROMPTS.agentValidate,
-    };
-
-    // Build knowledge context for the agent
-    const knowledgeContext = buildKnowledgeContext();
-    const userPrompt = knowledgeContext
-      ? `${knowledgeContext}Analyze the current Figma file based on the knowledge context above. Use the available tools to gather information and provide a comprehensive ${action} analysis.`
-      : `Analyze the current Figma file. Use the available tools to gather information and provide a comprehensive ${action} analysis.`;
-
-    // Run the agent with tools
-    setIsLoading(true);
-    try {
-      const response = await runAgent(
-        settings.apiKey,
-        settings.model,
-        agentPromptMap[action],
-        userPrompt,
-        handleAgentUpdate,
-        executeToolsViaPlugin
-      );
-      addMessage('assistant', response);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLoading(false);
-      setAgentStatus(null);
-    }
-  }, [settings.apiKey, settings.model, addMessage, showError, handleAgentUpdate, executeToolsViaPlugin, buildKnowledgeContext]);
-
-  // Save API key - sends to plugin for storage
-  const handleSaveApiKey = useCallback((key: string) => {
-    emit('SAVE_API_KEY', { key });
-    setConnectionTestResult(null);
-    // Also update local state immediately
-    setSettings(prev => ({ ...prev, apiKey: key, hasApiKey: !!key }));
-  }, []);
-
-  // Save model - sends to plugin for storage
-  const handleSaveModel = useCallback((model: ClaudeModel) => {
-    emit('SAVE_MODEL', { model });
-    // Also update local state immediately
-    setSettings(prev => ({ ...prev, model }));
-  }, []);
-
-  // Test connection - API call happens HERE in UI
-  const handleTestConnection = useCallback(async () => {
-    if (!settings.apiKey) {
-      setConnectionTestResult({ success: false, message: 'No API key configured' });
-      return;
-    }
-
-    setConnectionTestResult(null);
-    setIsLoading(true);
-    try {
-      const result = await testClaudeConnection(settings.apiKey, settings.model);
-      setConnectionTestResult({
-        success: result.success,
-        message: result.success ? 'Connected to Claude API!' : `Connection failed: ${result.error}`,
-      });
-    } catch (err) {
-      setConnectionTestResult({
-        success: false,
-        message: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [settings.apiKey, settings.model]);
-
-  // === Knowledge Base handlers ===
-
-  const handleAddKnowledgeEntry = useCallback((entry: { title: string; category: KnowledgeCategory; content: string }) => {
-    emit('ADD_KNOWLEDGE_ENTRY', entry);
-  }, []);
-
-  const handleUpdateKnowledgeEntry = useCallback((id: string, updates: { title?: string; category?: KnowledgeCategory; content?: string }) => {
-    emit('UPDATE_KNOWLEDGE_ENTRY', { id, ...updates });
-  }, []);
-
-  const handleDeleteKnowledgeEntry = useCallback((id: string) => {
-    emit('DELETE_KNOWLEDGE_ENTRY', { id });
-  }, []);
 
   // === License handlers ===
 
@@ -483,32 +235,6 @@ export function App() {
               </button>
             )}
             <button
-              onClick={() => setView('knowledge')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '32px',
-                height: '32px',
-                border: 'none',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: knowledgeBase.entries.length > 0
-                  ? 'var(--color-accent-soft)'
-                  : 'var(--figma-color-bg-secondary)',
-                color: knowledgeBase.entries.length > 0
-                  ? 'var(--color-accent)'
-                  : 'var(--figma-color-text-secondary)',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-              }}
-              title={`Knowledge Base (${knowledgeBase.entries.length} entries)`}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-              </svg>
-            </button>
-            <button
               onClick={() => setView('settings')}
               style={{
                 display: 'flex',
@@ -565,16 +291,14 @@ export function App() {
         {view === 'chat' && (
           <ChatView
             messages={messages}
-            isLoading={isLoading}
+            isLoading={false}
             hasApiKey={settings.hasApiKey}
             selectionContext={selectionContext}
-            agentStatus={agentStatus}
+            agentStatus={null}
             userEmail={license?.email || null}
             onSaveEmail={handleActivateLicense}
-            knowledgeEntryCount={knowledgeBase.entries.length}
-            knowledgeTotalChars={knowledgeBase.entries.reduce((sum, e) => sum + e.content.length, 0)}
-            onSendMessage={handleSendMessage}
-            onQuickAction={handleQuickAction}
+            onSendMessage={() => {}}
+            onQuickAction={() => {}}
             onOpenSettings={() => setView('settings')}
           />
         )}
@@ -584,26 +308,17 @@ export function App() {
             hasApiKey={settings.hasApiKey}
             model={settings.model}
             license={license}
-            analysesUsedThisMonth={analysesUsedThisMonth}
-            isLoading={isLoading}
-            connectionTestResult={connectionTestResult}
+            analysesUsedThisMonth={0}
+            isLoading={false}
+            connectionTestResult={null}
             mcpConnected={mcpStatus === 'connected'}
-            onSaveApiKey={handleSaveApiKey}
-            onSaveModel={handleSaveModel}
+            onSaveApiKey={() => {}}
+            onSaveModel={() => {}}
             onActivateLicense={handleActivateLicense}
             onDeactivateLicense={handleDeactivateLicense}
-            onTestConnection={handleTestConnection}
+            onTestConnection={() => {}}
             onBack={() => setView('chat')}
             onCollapse={handleCollapse}
-          />
-        )}
-        {view === 'knowledge' && (
-          <KnowledgeBaseView
-            knowledgeBase={knowledgeBase}
-            onAddEntry={handleAddKnowledgeEntry}
-            onUpdateEntry={handleUpdateKnowledgeEntry}
-            onDeleteEntry={handleDeleteKnowledgeEntry}
-            onBack={() => setView('chat')}
           />
         )}
       </div>
