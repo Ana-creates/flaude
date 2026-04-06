@@ -40,6 +40,7 @@ export function ChatView({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [emailInput, setEmailInput] = useState('');
   const [emailSaving, setEmailSaving] = useState(false);
+  const [emailError, setEmailError] = useState('');
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -49,6 +50,12 @@ export function ChatView({
   const handleEmailSubmit = async () => {
     const trimmed = emailInput.trim();
     if (!trimmed) return;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmed)) {
+      setEmailError('Please enter a valid email');
+      return;
+    }
+    setEmailError('');
     setEmailSaving(true);
     try {
       await saveUserEmail(trimmed);
@@ -146,7 +153,7 @@ export function ChatView({
             <input
               type="email"
               value={emailInput}
-              onInput={(e) => setEmailInput((e.target as HTMLInputElement).value)}
+              onInput={(e) => { setEmailInput((e.target as HTMLInputElement).value); setEmailError(''); }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleEmailSubmit(); }}
               placeholder="your@email.com"
               style={{
@@ -178,6 +185,15 @@ export function ChatView({
             >
               {emailSaving ? '...' : 'Get Started'}
             </button>
+          </div>
+        )}
+        {emailError && (
+          <div style={{
+            marginTop: '8px',
+            fontSize: '12px',
+            color: '#ef4444',
+          }}>
+            {emailError}
           </div>
         )}
       </div>
