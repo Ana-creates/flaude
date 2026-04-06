@@ -9,7 +9,7 @@ import { runAgent, type ToolCall, type ToolResult, type AgentUpdate } from '../p
 import { SYSTEM_PROMPTS } from '../shared/prompts';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
-import { checkProSubscription } from './api/supabase';
+import { saveUserEmail } from './api/supabase';
 import { mcpClient } from './mcp/websocket-client';
 import type { ChatMessage, SelectionContext, QuickActionType, Settings, ClaudeModel, KnowledgeBase, KnowledgeCategory, License } from '../shared/types';
 import './styles/globals.css';
@@ -112,31 +112,11 @@ export function App() {
     emit('RESIZE_UI', { width: UI_DIMENSIONS.width, height: UI_DIMENSIONS.height });
   }, []);
 
-  // DEV MODE: Skip Supabase verification during development
-  const DEV_MODE = true; // Set to false for production
-
-  // Verify Pro license against Supabase on startup (skip in dev mode)
+  // Save email to Supabase for community tracking
   useEffect(() => {
-    if (DEV_MODE) {
-      console.log('[Flaude] DEV MODE: Skipping license verification');
-      return;
-    }
-    if (license?.plan === 'pro' && license.email) {
-      checkProSubscription(license.email).then(({ isPro, verified }) => {
-        if (!isPro) {
-          // Email not in subscribers table - revoke
-          setLicense(null);
-          emit('SAVE_LICENSE', null);
-          setLicenseWarning('Your subscription could not be verified. Please contact studio@flaude.com');
-        } else if (!verified) {
-          // Email exists but not verified - revoke
-          setLicense(null);
-          emit('SAVE_LICENSE', null);
-          setLicenseWarning('Your subscription could not be verified. Please contact studio@flaude.com');
-        }
-      }).catch(() => {
-        // Network error - don't revoke, just let them use it
-        console.log('[Flaude] Could not verify license (network error)');
+    if (license?.email) {
+      saveUserEmail(license.email).catch(() => {
+        console.log('[Flaude] Could not save email (network error)');
       });
     }
   }, [license?.email]);
@@ -579,45 +559,6 @@ export function App() {
         </div>
       )}
 
-      {/* License Warning Banner */}
-      {licenseWarning && (
-        <div
-          className="fade-in"
-          style={{
-            margin: '0 16px 12px',
-            padding: '12px 16px',
-            fontSize: '12px',
-            backgroundColor: 'rgba(251, 191, 36, 0.1)',
-            color: '#b45309',
-            borderRadius: 'var(--radius-md)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '8px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            {licenseWarning}
-          </div>
-          <button
-            onClick={() => setLicenseWarning(null)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#b45309',
-              cursor: 'pointer',
-              padding: '4px',
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       {/* Main Content */}
       <div style={{ flex: 1, overflow: 'hidden' }}>

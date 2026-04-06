@@ -2,17 +2,13 @@ import { h, Fragment } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import {
   CLAUDE_MODELS,
-  PLAN_LIMITS,
-  FLAUDE_PRICE,
   type ClaudeModel,
   type License,
-  type PlanType,
 } from '../../../shared/types';
 import { MCPConnection } from './MCPConnection';
-import { activateProSubscription, REVOLUT_PAYMENT_LINK } from '../../api/supabase';
+import { saveUserEmail } from '../../api/supabase';
 import mascotUrl from '../../assets/mascot.png';
 import proGradientUrl from '../../assets/pro-gradient.jpg';
-import upgradeBgUrl from '../../assets/upgrade-bg.png';
 
 interface SettingsViewProps {
   apiKey: string;
@@ -52,36 +48,34 @@ export function SettingsView({
   const [inputValue, setInputValue] = useState(apiKey);
   const [showKey, setShowKey] = useState(false);
 
-  // Pro activation state
+  // Email collection state
   const [activationEmail, setActivationEmail] = useState('');
   const [activationStatus, setActivationStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [activationError, setActivationError] = useState('');
-  const [hasClickedPay, setHasClickedPay] = useState(false);
 
   useEffect(() => {
     setInputValue(apiKey);
   }, [apiKey]);
 
-  const handleActivatePro = () => {
+  const handleSaveEmail = async () => {
     if (!activationEmail.trim()) {
-      setActivationError('Please enter your payment email');
+      setActivationError('Please enter your email');
+      setActivationStatus('error');
       return;
     }
 
-    // Activate immediately (honor system - we trust the user)
-    setActivationStatus('success');
-    onActivateLicense(activationEmail.trim());
+    setActivationStatus('loading');
+    setActivationError('');
 
-    // Try to record in Supabase for your audit (fire and forget - don't block)
-    activateProSubscription(activationEmail.trim())
-      .then((result) => {
-        console.log('[Flaude] Supabase record result:', result);
-      })
-      .catch((err) => {
-        console.error('[Flaude] Supabase record failed:', err);
-      });
-
-    setActivationEmail('');
+    try {
+      await saveUserEmail(activationEmail.trim());
+      setActivationStatus('success');
+      onActivateLicense(activationEmail.trim());
+      setActivationEmail('');
+    } catch {
+      setActivationError('Could not save email. Check your connection and try again.');
+      setActivationStatus('error');
+    }
   };
 
   const handleSave = () => {
@@ -99,17 +93,7 @@ export function SettingsView({
   const hasChanges = inputValue.trim() !== apiKey;
   const hasValidKey = inputValue.trim().length > 0;
   const canSave = hasChanges && hasValidKey;
-  const isPro = license?.plan === 'pro';
-  const plan: PlanType = isPro ? 'pro' : 'free';
-  const limits = PLAN_LIMITS[plan];
-  const analysesRemaining = limits.analysesPerMonth === Infinity
-    ? Infinity
-    : Math.max(0, limits.analysesPerMonth - analysesUsedThisMonth);
-
-  // Filter models based on plan
-  const availableModels = CLAUDE_MODELS.filter(m =>
-    limits.models.includes(m.id)
-  );
+  const hasEmail = !!license?.email;
 
   return (
     <div
@@ -186,271 +170,165 @@ export function SettingsView({
       {/* Content */}
       <div style={{ flex: 1, padding: '16px', overflowY: 'auto' }}>
 
-        {/* Plan & MCP Section */}
+        {/* MCP & Email Section */}
         <div
           style={{
-            padding: isPro ? '0' : '12px',
+            padding: '0',
             marginBottom: '16px',
             borderRadius: 'var(--radius-lg)',
-            background: isPro
-              ? `linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.3) 30%, rgba(0, 0, 0, 0) 60%), url(${proGradientUrl}) center/cover no-repeat`
-              : `url(${upgradeBgUrl}) center/cover no-repeat`,
-            border: isPro ? 'none' : 'none',
+            background: `linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.3) 30%, rgba(0, 0, 0, 0) 60%), url(${proGradientUrl}) center/cover no-repeat`,
             boxShadow: '0 4px 24px rgba(0, 0, 0, 0.3)',
-            minHeight: isPro ? '340px' : 'auto',
-            display: isPro ? 'flex' : 'block',
+            minHeight: '200px',
+            display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
             overflow: 'hidden',
           }}
         >
-          {isPro ? (
-            <>
-              {/* Top section - Flaude Pro title */}
-              <div style={{ padding: '16px 16px 0' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                  <img
-                    src={mascotUrl}
-                    alt="Flaude Pro"
+          {/* Top section - Flaude title */}
+          <div style={{ padding: '16px 16px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              <img
+                src={mascotUrl}
+                alt="Flaude"
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  objectFit: 'contain',
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{
+                    fontSize: '20px',
+                    fontFamily: 'var(--font-display)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    color: '#ffffff'
+                  }}>
+                    Flaude
+                  </span>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    padding: '3px 8px',
+                    borderRadius: 'var(--radius-full)',
+                    border: '1px solid rgba(34, 197, 94, 0.6)',
+                    color: 'rgba(34, 197, 94, 0.9)',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                  }}>
+                    FREE
+                  </span>
+                </div>
+                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', margin: 0, lineHeight: 1.4 }}>
+                  Free & open source. All features unlocked.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom section - MCP Connection & Email */}
+          <div style={{ padding: '12px 16px 16px' }}>
+            {/* MCP Connection */}
+            <MCPConnection license={license} variant="dark" />
+
+            {/* Email collection */}
+            {!hasEmail ? (
+              <div style={{ marginTop: '12px' }}>
+                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '8px', marginTop: 0 }}>
+                  Enter your email to stay updated:
+                </p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="email"
+                    value={activationEmail}
+                    onInput={(e) => setActivationEmail((e.target as HTMLInputElement).value)}
+                    placeholder="you@email.com"
                     style={{
-                      width: '40px',
-                      height: '40px',
-                      objectFit: 'contain',
-                      flexShrink: 0,
+                      flex: 1,
+                      padding: '8px 12px',
+                      fontSize: '12px',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundColor: 'rgba(255,255,255,0.1)',
+                      color: '#ffffff',
+                      boxSizing: 'border-box',
                     }}
                   />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                      <span style={{
-                        fontSize: '20px',
-                        fontFamily: 'var(--font-display)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                        color: '#ffffff'
-                      }}>
-                        Flaude Pro
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{
-                          fontSize: '10px',
-                          fontWeight: 600,
-                          padding: '3px 8px',
-                          borderRadius: 'var(--radius-full)',
-                          border: '1px solid rgba(255, 255, 255, 0.5)',
-                          color: 'rgba(255, 255, 255, 0.9)',
-                        }}>
-                          MCP
-                        </span>
-                        {/* DEV: Test deactivation */}
-                        <button
-                          onClick={onDeactivateLicense}
-                          style={{
-                            fontSize: '8px',
-                            padding: '2px 4px',
-                            borderRadius: '4px',
-                            border: '1px dashed rgba(255,255,255,0.3)',
-                            backgroundColor: 'transparent',
-                            color: 'rgba(255,255,255,0.5)',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          TEST
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <button
+                    onClick={handleSaveEmail}
+                    disabled={activationStatus === 'loading' || !activationEmail.trim()}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      border: 'none',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundColor: activationStatus === 'loading' || !activationEmail.trim()
+                        ? 'rgba(255,255,255,0.1)'
+                        : 'rgba(255,255,255,0.2)',
+                      color: activationStatus === 'loading' || !activationEmail.trim()
+                        ? 'rgba(255,255,255,0.4)'
+                        : '#ffffff',
+                      cursor: activationStatus === 'loading' || !activationEmail.trim() ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {activationStatus === 'loading' ? '...' : 'Save'}
+                  </button>
                 </div>
-              </div>
-
-              {/* Bottom section - MCP Connection & License */}
-              <div style={{ padding: '0 16px 16px' }}>
-                {/* MCP Connection - inside Pro section */}
-                <MCPConnection license={license} variant="dark" />
-
-                {/* License info */}
-                {license && (
-                  <div style={{
-                    marginTop: '14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}>
-                    <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.9)' }}>
-                      Licensed to: {license.email}
-                    </span>
-                    <a
-                      href="https://flaude.app"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={onDeactivateLicense}
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '10px',
-                        borderRadius: '4px',
-                        backgroundColor: 'transparent',
-                        color: 'rgba(255, 255, 255, 0.7)',
-                        cursor: 'pointer',
-                        textDecoration: 'none',
-                      }}
-                    >
-                      Deactivate
-                    </a>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.85)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              borderRadius: 'var(--radius-md)',
-              padding: '16px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{
-                  fontSize: '15px',
-                  fontFamily: 'var(--font-display)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  color: 'var(--figma-color-text)'
-                }}>
-                  Design Without Limits
-                </span>
-                <span style={{
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  padding: '3px 8px',
-                  borderRadius: 'var(--radius-full)',
-                  border: '1px solid var(--figma-color-text)',
-                  color: 'var(--figma-color-text)',
-                }}>
-                  MCP
-                </span>
-              </div>
-              <p style={{ fontSize: '12px', color: 'var(--figma-color-text-secondary)', marginBottom: '12px', marginTop: 0, lineHeight: 1.5 }}>
-                Works with Claude Desktop or terminal via MCP. Design entire screens, generate variants, and iterate without hitting API limits.
-              </p>
-
-              {/* Subscribe button */}
-              <div style={{ marginBottom: '16px' }}>
-                <a
-                  href={REVOLUT_PAYMENT_LINK}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setHasClickedPay(true)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    padding: '10px 24px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    borderRadius: 'var(--radius-md)',
-                    background: 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)',
-                    color: 'white',
-                    textDecoration: 'none',
-                    textAlign: 'center',
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  Subscribe now ({FLAUDE_PRICE}) →
-                </a>
-              </div>
-
-              {/* Activate section */}
-              <div>
-                <input
-                  type="email"
-                  value={activationEmail}
-                  onInput={(e) => setActivationEmail((e.target as HTMLInputElement).value)}
-                  placeholder="you@email.com"
-                  disabled={!hasClickedPay}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    fontSize: '12px',
-                    border: '1px solid var(--figma-color-border)',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: hasClickedPay ? 'var(--figma-color-bg)' : 'var(--figma-color-bg-tertiary)',
-                    color: hasClickedPay ? 'var(--figma-color-text)' : 'var(--figma-color-text-disabled)',
-                    marginBottom: '8px',
-                    boxSizing: 'border-box',
-                    cursor: hasClickedPay ? 'text' : 'not-allowed',
-                  }}
-                />
-                <button
-                  onClick={handleActivatePro}
-                  disabled={!hasClickedPay || activationStatus === 'loading' || !activationEmail.trim()}
-                  style={{
-                    width: '100%',
-                    padding: '10px 16px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    border: 'none',
-                    borderRadius: 'var(--radius-md)',
-                    background: !hasClickedPay || activationStatus === 'loading' || !activationEmail.trim()
-                      ? 'var(--figma-color-bg-tertiary)'
-                      : 'linear-gradient(135deg, #50BCFF 0%, #0026FF 35%, #001799 65%, #5C74FF 100%)',
-                    color: !hasClickedPay || activationStatus === 'loading' || !activationEmail.trim()
-                      ? 'var(--figma-color-text-disabled)'
-                      : 'white',
-                    cursor: !hasClickedPay || activationStatus === 'loading' || !activationEmail.trim() ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {activationStatus === 'loading' ? 'Activating...' : 'Activate my account'}
-                </button>
-
                 {activationStatus === 'error' && activationError && (
                   <div style={{
                     marginTop: '8px',
-                    padding: '8px 12px',
+                    padding: '6px 10px',
                     fontSize: '11px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    color: '#dc2626',
+                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                    color: '#fca5a5',
                     borderRadius: 'var(--radius-md)',
                   }}>
                     {activationError}
                   </div>
                 )}
-
                 {activationStatus === 'success' && (
                   <div style={{
                     marginTop: '8px',
-                    padding: '8px 12px',
+                    padding: '6px 10px',
                     fontSize: '11px',
-                    backgroundColor: 'var(--color-success-soft)',
-                    color: 'var(--color-success)',
+                    backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                    color: '#86efac',
                     borderRadius: 'var(--radius-md)',
                   }}>
-                    Pro activated! Refresh to see changes.
+                    Email saved! Thanks for joining the community.
                   </div>
                 )}
               </div>
-
-              <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '10px', color: 'var(--figma-color-text-tertiary)' }}>
-                  Questions?{' '}
-                  <a
-                    href="mailto:studio@flaude.com"
-                    style={{ color: 'var(--figma-color-text-tertiary)', textDecoration: 'underline' }}
-                  >
-                    studio@flaude.com
-                  </a>
+            ) : (
+              <div style={{
+                marginTop: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.9)' }}>
+                  {license!.email}
                 </span>
-                <img
-                  src={mascotUrl}
-                  alt="Flaude"
+                <button
+                  onClick={onDeactivateLicense}
                   style={{
-                    width: '28px',
-                    height: '28px',
-                    objectFit: 'contain',
-                    transform: 'scaleX(-1)',
-                    opacity: 0.6,
+                    padding: '4px 8px',
+                    fontSize: '10px',
+                    border: 'none',
+                    borderRadius: '4px',
+                    backgroundColor: 'transparent',
+                    color: 'rgba(255, 255, 255, 0.5)',
+                    cursor: 'pointer',
                   }}
-                />
+                >
+                  Clear
+                </button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* API Key Section - FREE */}
@@ -683,12 +561,12 @@ export function SettingsView({
                 paddingLeft: '4px',
               }}
             >
-              {isPro ? 'All models available' : 'Upgrade to Pro for Sonnet & Opus'}
+              All models available
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {CLAUDE_MODELS.map((m) => {
-                const isAvailable = limits.models.includes(m.id);
+                const isAvailable = true;
                 const isSelected = model === m.id;
 
                 return (
@@ -724,18 +602,6 @@ export function SettingsView({
                         gap: '6px',
                       }}>
                         {m.name}
-                        {!isAvailable && (
-                          <span style={{
-                            fontSize: '9px',
-                            padding: '2px 6px',
-                            borderRadius: 'var(--radius-sm)',
-                            backgroundColor: 'var(--color-accent-soft)',
-                            color: 'var(--color-accent)',
-                            fontWeight: 700,
-                          }}>
-                            PRO
-                          </span>
-                        )}
                       </div>
                       <div style={{ fontSize: '11px', color: 'var(--figma-color-text-tertiary)', marginTop: '2px' }}>
                         {m.description}

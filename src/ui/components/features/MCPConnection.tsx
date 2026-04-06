@@ -4,7 +4,7 @@
  * Shows connection status to the MCP server and allows
  * toggling the connection.
  *
- * IMPORTANT: MCP integration is a Pro-only feature.
+ * MCP integration is available to all users.
  */
 
 import { h } from 'preact';
@@ -27,7 +27,6 @@ export function MCPConnection({ license, variant = 'light', onDeactivate }: MCPC
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [copied, setCopied] = useState(false);
 
-  const isPro = license?.plan === 'pro';
   const isDark = variant === 'dark';
 
   useEffect(() => {
@@ -36,17 +35,27 @@ export function MCPConnection({ license, variant = 'light', onDeactivate }: MCPC
   }, [license]);
 
   useEffect(() => {
-    mcpClient.onStatusChange((newStatus, message) => {
+    const unsubscribe = mcpClient.onStatusChange((newStatus, message) => {
       setStatus(newStatus);
       setStatusMessage(message || '');
     });
+    return unsubscribe;
   }, []);
 
   const handleToggle = () => {
-    if (status === 'connected' || status === 'connecting') {
-      mcpClient.disconnect();
-    } else {
-      mcpClient.connect();
+    console.log('[MCPConnection] Toggle clicked, status:', status, 'license:', license);
+    try {
+      if (status === 'connected' || status === 'connecting') {
+        mcpClient.disconnect();
+      } else {
+        // Ensure license is set before connecting
+        mcpClient.setLicense(license);
+        mcpClient.connect();
+      }
+    } catch (err) {
+      console.error('[MCPConnection] Error:', err);
+      setStatus('error');
+      setStatusMessage('Failed to connect');
     }
   };
 
@@ -81,15 +90,8 @@ export function MCPConnection({ license, variant = 'light', onDeactivate }: MCPC
     connecting: 'Authenticating...',
     connected: 'Connected',
     error: 'Error',
-    auth_failed: 'Pro Required',
+    auth_failed: 'Auth Failed',
   };
-
-  // Only show for Pro users
-  if (!isPro) {
-    return null;
-  }
-
-  // Pro user - show connection controls
   return (
     <div style={{
       padding: isDark ? '12px 14px' : '12px 16px',

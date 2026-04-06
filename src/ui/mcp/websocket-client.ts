@@ -7,7 +7,7 @@
  * MCP Server -> WebSocket -> UI -> Plugin -> Figma
  * Figma -> Plugin -> UI -> WebSocket -> MCP Server
  *
- * IMPORTANT: Requires Flaude Pro license for authentication
+ * Sends user email for identification (no license required)
  */
 
 import { emit, on } from '@create-figma-plugin/utilities';
@@ -58,22 +58,17 @@ class MCPWebSocketClient {
   }
 
   /**
-   * Set the license for authentication
-   * Must be called before connect() for Pro features
+   * Set the license for identification
    */
   setLicense(license: License | null) {
     this.license = license;
   }
 
-  /**
-   * Check if user has Pro license
-   */
-  hasProLicense(): boolean {
-    return this.license?.plan === 'pro';
-  }
-
-  onStatusChange(callback: StatusChangeCallback) {
+  onStatusChange(callback: StatusChangeCallback): () => void {
     this.statusCallbacks.push(callback);
+    return () => {
+      this.statusCallbacks = this.statusCallbacks.filter(cb => cb !== callback);
+    };
   }
 
   private notifyStatus(status: ConnectionStatus, message?: string) {
@@ -81,15 +76,21 @@ class MCPWebSocketClient {
   }
 
   connect() {
-    // Check for Pro license before attempting connection
-    if (!this.hasProLicense()) {
-      console.error('[MCP Client] Pro license required for MCP connection');
-      this.notifyStatus('auth_failed', 'Flaude Pro required. Upgrade to use Claude Code integration.');
+    console.log('[MCP Client] connect() called');
+
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      console.log('[MCP Client] Already connected');
       return;
     }
 
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return;
+    // Close any existing connection first
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch (e) {
+        console.log('[MCP Client] Error closing existing connection:', e);
+      }
+      this.ws = null;
     }
 
     this.isManuallyDisconnected = false;
@@ -97,6 +98,7 @@ class MCPWebSocketClient {
     this.notifyStatus('connecting');
 
     try {
+      console.log('[MCP Client] Creating WebSocket to', WS_URL);
       this.ws = new WebSocket(WS_URL);
 
       this.ws.onopen = () => {
@@ -135,6 +137,7 @@ class MCPWebSocketClient {
       this.ws.onclose = () => {
         console.log('[MCP Client] Disconnected from MCP server');
         this.isAuthenticated = false;
+        this.rejectPendingRequests('Connection lost');
         this.notifyStatus('disconnected');
 
         if (!this.isManuallyDisconnected && this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -163,17 +166,10 @@ class MCPWebSocketClient {
       return;
     }
 
-    if (!this.license) {
-      console.error('[MCP Client] No license available for auth');
-      this.notifyStatus('auth_failed', 'No Pro license found');
-      this.disconnect();
-      return;
-    }
-
     this.ws.send(JSON.stringify({
       type: 'auth',
-      email: this.license.email,
-      key: this.license.key,
+      email: this.license?.email || 'anonymous',
+      key: this.license?.key || 'community',
     }));
   }
 
@@ -198,7 +194,15 @@ class MCPWebSocketClient {
     this.isManuallyDisconnected = true;
     this.ws?.close();
     this.ws = null;
+    this.rejectPendingRequests('Disconnected');
     this.notifyStatus('disconnected');
+  }
+
+  private rejectPendingRequests(reason: string) {
+    for (const [id, pending] of this.pendingRequests) {
+      pending.reject(new Error(reason));
+    }
+    this.pendingRequests.clear();
   }
 
   private handleCommand(command: MCPCommand) {

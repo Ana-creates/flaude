@@ -77,10 +77,15 @@ export const KNOWLEDGE_CATEGORIES: { id: KnowledgeCategory; label: string; descr
   { id: 'other', label: 'Other', description: 'Research, notes, etc.' },
 ];
 
-// ============== LICENSE / PRO ==============
+// ============== USER EMAIL ==============
 
+export interface UserEmail {
+  email: string;
+  savedAt: number;
+}
+
+// Keep License as alias for backwards compatibility with storage
 export type PlanType = 'free' | 'pro';
-
 export interface License {
   email: string;
   key: string;
@@ -90,14 +95,11 @@ export interface License {
 
 export const PLAN_LIMITS = {
   free: {
-    analysesPerMonth: Infinity,  // TESTING MODE - remove limit
-    models: ['claude-haiku-3-5-20241022', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'] as ClaudeModel[],  // TESTING MODE - all models
+    analysesPerMonth: Infinity,
+    models: ['claude-haiku-3-5-20241022', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'] as ClaudeModel[],
   },
   pro: {
     analysesPerMonth: Infinity,
     models: ['claude-haiku-3-5-20241022', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'] as ClaudeModel[],
   },
 };
-
-export const FLAUDE_UPGRADE_URL = 'https://flaude.app/upgrade';
-export const FLAUDE_PRICE = '$7/month';
