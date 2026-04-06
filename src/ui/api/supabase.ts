@@ -4,8 +4,8 @@
  * Saves user emails to the subscribers table for community tracking
  */
 
-const SUPABASE_URL = 'https://lrgwkvmiihatpfiesima.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_NCa4zE_gcw-6ns_Cu53yXQ_Y873IfDC';
+const SUPABASE_URL = 'https://tmuevunmxwmrmluxzayd.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_BmGpgI2Kx4GKuiqhYq_eXA_qPpRrPXc';
 
 /**
  * Save a user's email to the subscribers table

@@ -1,7 +1,7 @@
 {
   "name": "flaude",
   "version": "1.0.0",
-  "description": "AI design assistant for Figma — generate production-ready designs with Claude or OpenAI",
+  "description": "AI design assistant for Figma — generate production-ready designs with Claude",
   "license": "MIT",
   "scripts": {
     "build": "build-figma-plugin --typecheck --minify",
@@ -17,23 +17,21 @@
     "typecheck": "tsc --noEmit"
   },
   "figma-plugin": {
-    "id": "1599896144665000376",
+    "id": "1602008265160037545",
     "name": "Flaude",
     "editorType": [
-      "figma",
-      "figjam"
+      "figma"
     ],
     "main": "src/plugin/main.ts",
     "ui": "src/ui/index.tsx",
-    "capabilities": [],
+    "documentAccess": "dynamic-page",
     "permissions": [
       "currentuser"
     ],
     "networkAccess": {
       "allowedDomains": [
         "https://api.anthropic.com",
-        "https://api.openai.com",
-        "https://lrgwkvmiihatpfiesima.supabase.co",
+        "https://tmuevunmxwmrmluxzayd.supabase.co",
         "https://fonts.googleapis.com",
         "https://fonts.gstatic.com"
       ],
