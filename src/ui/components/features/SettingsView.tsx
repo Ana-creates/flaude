@@ -233,76 +233,8 @@ export function SettingsView({
             {/* MCP Connection */}
             <MCPConnection license={license} variant="dark" />
 
-            {/* Email collection */}
-            {!hasEmail ? (
-              <div style={{ marginTop: '12px' }}>
-                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '8px', marginTop: 0 }}>
-                  Enter your email to stay updated:
-                </p>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="email"
-                    value={activationEmail}
-                    onInput={(e) => setActivationEmail((e.target as HTMLInputElement).value)}
-                    placeholder="you@email.com"
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      fontSize: '12px',
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'rgba(255,255,255,0.1)',
-                      color: '#ffffff',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                  <button
-                    onClick={handleSaveEmail}
-                    disabled={activationStatus === 'loading' || !activationEmail.trim()}
-                    style={{
-                      padding: '8px 16px',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: activationStatus === 'loading' || !activationEmail.trim()
-                        ? 'rgba(255,255,255,0.1)'
-                        : 'rgba(255,255,255,0.2)',
-                      color: activationStatus === 'loading' || !activationEmail.trim()
-                        ? 'rgba(255,255,255,0.4)'
-                        : '#ffffff',
-                      cursor: activationStatus === 'loading' || !activationEmail.trim() ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {activationStatus === 'loading' ? '...' : 'Save'}
-                  </button>
-                </div>
-                {activationStatus === 'error' && activationError && (
-                  <div style={{
-                    marginTop: '8px',
-                    padding: '6px 10px',
-                    fontSize: '11px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                    color: '#fca5a5',
-                    borderRadius: 'var(--radius-md)',
-                  }}>
-                    {activationError}
-                  </div>
-                )}
-                {activationStatus === 'success' && (
-                  <div style={{
-                    marginTop: '8px',
-                    padding: '6px 10px',
-                    fontSize: '11px',
-                    backgroundColor: 'rgba(34, 197, 94, 0.2)',
-                    color: '#86efac',
-                    borderRadius: 'var(--radius-md)',
-                  }}>
-                    Email saved! Thanks for joining the community.
-                  </div>
-                )}
-              </div>
-            ) : (
+            {/* Email display */}
+            {hasEmail && (
               <div style={{
                 marginTop: '12px',
                 display: 'flex',

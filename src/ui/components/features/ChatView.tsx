@@ -1,9 +1,10 @@
 import { h, Fragment } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { ChatMessage } from '../common/ChatMessage';
 import { ChatInput } from '../common/ChatInput';
 import { QuickActionsBar } from '../common/QuickAction';
 import { AgentLoadingSteps } from '../common/AgentLoadingSteps';
+import { saveUserEmail } from '../../api/supabase';
 import mascotUrl from '../../assets/mascot.png';
 import type { ChatMessage as ChatMessageType, QuickActionType, SelectionContext } from '../../../shared/types';
 
@@ -15,6 +16,8 @@ interface ChatViewProps {
   agentStatus: string | null;
   knowledgeEntryCount?: number;
   knowledgeTotalChars?: number;
+  userEmail: string | null;
+  onSaveEmail: (email: string) => void;
   onSendMessage: (message: string) => void;
   onQuickAction: (action: QuickActionType) => void;
   onOpenSettings: () => void;
@@ -28,16 +31,35 @@ export function ChatView({
   agentStatus,
   knowledgeEntryCount = 0,
   knowledgeTotalChars = 0,
+  userEmail,
+  onSaveEmail,
   onSendMessage,
   onQuickAction,
   onOpenSettings,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [emailInput, setEmailInput] = useState('');
+  const [emailSaving, setEmailSaving] = useState(false);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleEmailSubmit = async () => {
+    const trimmed = emailInput.trim();
+    if (!trimmed) return;
+    setEmailSaving(true);
+    try {
+      await saveUserEmail(trimmed);
+      onSaveEmail(trimmed);
+      setEmailInput('');
+    } catch {
+      // silently fail
+    } finally {
+      setEmailSaving(false);
+    }
+  };
 
   if (!hasApiKey) {
     return (
@@ -86,23 +108,76 @@ export function ChatView({
         >
           Connect your Claude API key to start designing with AI directly in Figma.
         </div>
-        <button
-          onClick={onOpenSettings}
-          style={{
-            padding: '14px 32px',
-            fontSize: '14px',
-            fontWeight: 600,
-            border: 'none',
-            borderRadius: 'var(--radius-full)',
-            background: 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)',
-            color: 'white',
-            cursor: 'pointer',
-            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          Get Started
-        </button>
+
+        {/* Email + Get Started pill */}
+        {userEmail ? (
+          <button
+            onClick={onOpenSettings}
+            style={{
+              padding: '14px 32px',
+              fontSize: '14px',
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: 'var(--radius-full)',
+              background: 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)',
+              color: 'white',
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            Get Started
+          </button>
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: 'var(--radius-full)',
+              background: 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+              overflow: 'hidden',
+              width: '100%',
+              maxWidth: '320px',
+            }}
+          >
+            <input
+              type="email"
+              value={emailInput}
+              onInput={(e) => setEmailInput((e.target as HTMLInputElement).value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleEmailSubmit(); }}
+              placeholder="your@email.com"
+              style={{
+                flex: 1,
+                padding: '14px 16px',
+                fontSize: '13px',
+                border: 'none',
+                background: 'transparent',
+                color: 'white',
+                outline: 'none',
+                minWidth: 0,
+              }}
+            />
+            <button
+              onClick={handleEmailSubmit}
+              disabled={emailSaving || !emailInput.trim()}
+              style={{
+                padding: '14px 20px',
+                fontSize: '14px',
+                fontWeight: 600,
+                border: 'none',
+                borderLeft: '1px solid rgba(255,255,255,0.15)',
+                background: 'transparent',
+                color: emailSaving || !emailInput.trim() ? 'rgba(255,255,255,0.3)' : 'white',
+                cursor: emailSaving || !emailInput.trim() ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {emailSaving ? '...' : 'Get Started'}
+            </button>
+          </div>
+        )}
       </div>
     );
   }

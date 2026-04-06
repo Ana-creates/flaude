@@ -569,6 +569,8 @@ export function App() {
             hasApiKey={settings.hasApiKey}
             selectionContext={selectionContext}
             agentStatus={agentStatus}
+            userEmail={license?.email || null}
+            onSaveEmail={handleActivateLicense}
             knowledgeEntryCount={knowledgeBase.entries.length}
             knowledgeTotalChars={knowledgeBase.entries.reduce((sum, e) => sum + e.content.length, 0)}
             onSendMessage={handleSendMessage}
