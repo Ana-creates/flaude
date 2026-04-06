@@ -203,7 +203,7 @@ export function MCPConnection({ license, variant = 'light', onDeactivate }: MCPC
             </button>
           </div>
           <a
-            href="https://flaude.app/docs/mcp"
+            href="https://flaude.app/#get-started"
             target="_blank"
             rel="noopener noreferrer"
             style={{
