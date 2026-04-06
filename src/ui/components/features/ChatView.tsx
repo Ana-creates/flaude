@@ -54,6 +54,8 @@ export function ChatView({
       await saveUserEmail(trimmed);
       onSaveEmail(trimmed);
       setEmailInput('');
+      // Go straight to settings after email is saved
+      onOpenSettings();
     } catch {
       // silently fail
     } finally {

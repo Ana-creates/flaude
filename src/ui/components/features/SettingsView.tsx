@@ -230,34 +230,47 @@ export function SettingsView({
 
           {/* Bottom section - MCP Connection & Email */}
           <div style={{ padding: '12px 16px 16px' }}>
-            {/* MCP Connection */}
-            <MCPConnection license={license} variant="dark" />
+            {hasEmail ? (
+              <>
+                {/* MCP Connection */}
+                <MCPConnection license={license} variant="dark" />
 
-            {/* Email display */}
-            {hasEmail && (
+                {/* Email display */}
+                <div style={{
+                  marginTop: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.9)' }}>
+                    {license!.email}
+                  </span>
+                  <button
+                    onClick={onDeactivateLicense}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '10px',
+                      border: 'none',
+                      borderRadius: '4px',
+                      backgroundColor: 'transparent',
+                      color: 'rgba(255, 255, 255, 0.5)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </>
+            ) : (
               <div style={{
-                marginTop: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
+                padding: '12px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                textAlign: 'center',
               }}>
-                <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.9)' }}>
-                  {license!.email}
+                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>
+                  Submit your email first to connect
                 </span>
-                <button
-                  onClick={onDeactivateLicense}
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: '10px',
-                    border: 'none',
-                    borderRadius: '4px',
-                    backgroundColor: 'transparent',
-                    color: 'rgba(255, 255, 255, 0.5)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Clear
-                </button>
               </div>
             )}
           </div>
@@ -272,6 +285,8 @@ export function SettingsView({
             backgroundColor: 'var(--figma-color-bg-secondary)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--figma-color-border)',
+            opacity: hasEmail ? 1 : 0.5,
+            pointerEvents: hasEmail ? 'auto' : 'none',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
