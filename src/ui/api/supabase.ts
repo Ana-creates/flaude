@@ -5,7 +5,7 @@
  */
 
 const SUPABASE_URL = 'https://tmuevunmxwmrmluxzayd.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_BmGpgI2Kx4GKuiqhYq_eXA_qPpRrPXc';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtdWV2dW5teHdtcm1sdXh6YXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODQ3NzAsImV4cCI6MjA5MTA2MDc3MH0.orAhD15AB3F-Xub2on7kJNiBMdjyJKtWB6LBIS8lMjI';
 
 /**
  * Save a user's email to the subscribers table
@@ -22,7 +22,6 @@ export async function saveUserEmail(email: string): Promise<void> {
           apikey: SUPABASE_ANON_KEY,
           Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
-          Prefer: 'resolution=merge-duplicates',
         },
         body: JSON.stringify({ email: normalizedEmail }),
         signal: AbortSignal.timeout(8000),
