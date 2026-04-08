@@ -111,7 +111,7 @@ export function ChatView({
             maxWidth: '280px',
           }}
         >
-          Connect your Claude API key to start designing with AI directly in Figma.
+          Design with Claude directly in Figma. Free & open source.
         </div>
 
         {/* Email + Get Started pill */}
