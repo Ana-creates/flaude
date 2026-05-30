@@ -322,7 +322,12 @@ export function SettingsView({
           {/* Bottom section — Pro: connect Claude action / Free: legacy local-MCP info / No email: prompt */}
           <div style={{ padding: '12px 16px 16px' }}>
             {hasEmail && isPro ? (
-              <>
+              <div style={{
+                padding: '14px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                backdropFilter: 'blur(10px)',
+              }}>
                 {/* Step 1 — Copy URL */}
                 <div style={{ marginBottom: '12px' }}>
                   <div style={{
@@ -453,7 +458,7 @@ export function SettingsView({
                     Clear
                   </button>
                 </div>
-              </>
+              </div>
             ) : hasEmail ? (
               <>
                 {/* Free user with email — show legacy local MCP info */}
