@@ -30,13 +30,9 @@
     ],
     "networkAccess": {
       "allowedDomains": [
-        "https://api.anthropic.com",
-        "https://tmuevunmxwmrmluxzayd.supabase.co",
-        "https://fonts.googleapis.com",
-        "https://fonts.gstatic.com",
-        "wss://flaude-pro-mcp.fly.dev",
-        "wss://mcp.flaude.app"
+        "*"
       ],
+      "reasoning": "Flaude lets Claude fetch and import images from any URL into Figma designs (e.g. references from Unsplash, the user's S3, Google Drive, Cloudinary). The wildcard is needed so users can drop in inspiration images and brand assets without us maintaining an allowlist.",
       "devAllowedDomains": [
         "ws://localhost:9876"
       ]
