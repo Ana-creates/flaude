@@ -1,20 +1,18 @@
 /**
- * Supabase client — email collection (free) + Pro subscription verification
- *
- * Two backends:
- *   - tmuevunmxwmrmluxzayd: community email collection (free OSS users)
- *   - lrgwkvmiihatpfiesima:  Pro subscriptions (managed by flaude-website / Prisma)
+ * Supabase client — single project hosts:
+ *   - `subscribers` table (community email collection from OSS welcome screen)
+ *   - `Subscription` / `User` / `Order` tables (Pro subscriptions, managed by flaude-website / Prisma)
  */
 
-// Community email collection
-const EMAIL_SUPABASE_URL = 'https://tmuevunmxwmrmluxzayd.supabase.co';
-const EMAIL_SUPABASE_ANON_KEY =
+const SUPABASE_URL = 'https://tmuevunmxwmrmluxzayd.supabase.co';
+const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtdWV2dW5teHdtcm1sdXh6YXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODQ3NzAsImV4cCI6MjA5MTA2MDc3MH0.orAhD15AB3F-Xub2on7kJNiBMdjyJKtWB6LBIS8lMjI';
 
-// Pro subscription verification (read-only against website's DB)
-const SUBSCRIPTION_SUPABASE_URL = 'https://lrgwkvmiihatpfiesima.supabase.co';
-const SUBSCRIPTION_SUPABASE_ANON_KEY =
-  'sb_publishable_NCa4zE_gcw-6ns_Cu53yXQ_Y873IfDC';
+// Aliases (kept for readability across function bodies)
+const EMAIL_SUPABASE_URL = SUPABASE_URL;
+const EMAIL_SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
+const SUBSCRIPTION_SUPABASE_URL = SUPABASE_URL;
+const SUBSCRIPTION_SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
 
 // Revolut Payment Link — customers click this to buy Pro
 export const REVOLUT_PAYMENT_LINK =

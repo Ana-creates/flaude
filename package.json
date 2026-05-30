@@ -32,7 +32,6 @@
       "allowedDomains": [
         "https://api.anthropic.com",
         "https://tmuevunmxwmrmluxzayd.supabase.co",
-        "https://lrgwkvmiihatpfiesima.supabase.co",
         "https://fonts.googleapis.com",
         "https://fonts.gstatic.com",
         "wss://flaude-pro-mcp.fly.dev",
