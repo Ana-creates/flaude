@@ -13,7 +13,8 @@
 import { emit, on } from '@create-figma-plugin/utilities';
 import type { License } from '../../shared/types';
 
-const WS_URL = 'ws://localhost:9876';
+const LOCAL_WS_URL = 'ws://localhost:9876';
+const HOSTED_WS_URL = 'wss://flaude-pro-mcp.fly.dev/plugin';
 const RECONNECT_INTERVAL = 3000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
@@ -75,6 +76,18 @@ class MCPWebSocketClient {
     this.statusCallbacks.forEach(cb => cb(status, message));
   }
 
+  /**
+   * Resolve which MCP server URL to use based on license:
+   *  - Pro user → hosted MCP at wss://flaude-pro-mcp.fly.dev/plugin?email=X
+   *  - Otherwise → local MCP at ws://localhost:9876 (requires `npx flaude-mcp` running)
+   */
+  private getWebSocketUrl(): string {
+    if (this.license?.plan === 'pro' && this.license.email) {
+      return `${HOSTED_WS_URL}?email=${encodeURIComponent(this.license.email)}`;
+    }
+    return LOCAL_WS_URL;
+  }
+
   connect() {
     console.log('[MCP Client] connect() called');
 
@@ -97,9 +110,10 @@ class MCPWebSocketClient {
     this.isAuthenticated = false;
     this.notifyStatus('connecting');
 
+    const wsUrl = this.getWebSocketUrl();
     try {
-      console.log('[MCP Client] Creating WebSocket to', WS_URL);
-      this.ws = new WebSocket(WS_URL);
+      console.log('[MCP Client] Creating WebSocket to', wsUrl);
+      this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
         console.log('[MCP Client] WebSocket connected, sending authentication...');

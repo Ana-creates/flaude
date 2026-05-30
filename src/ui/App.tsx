@@ -5,7 +5,7 @@ import { ChatView } from './components/features/ChatView';
 import { SettingsView } from './components/features/SettingsView';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
-import { saveUserEmail } from './api/supabase';
+import { saveUserEmail, checkProSubscription } from './api/supabase';
 import { mcpClient } from './mcp/websocket-client';
 import type { ChatMessage, SelectionContext, Settings, License } from '../shared/types';
 import './styles/globals.css';
@@ -98,12 +98,18 @@ export function App() {
     emit('SAVE_LICENSE', null);
   }, []);
 
-  const handleActivateLicense = useCallback((email: string) => {
+  const handleActivateLicense = useCallback(async (email: string) => {
     const normalizedEmail = email.toLowerCase().trim();
+
+    // Check real subscription status against Supabase.
+    // Free users get plan='free' → websocket-client uses local MCP.
+    // Paid users get plan='pro' → websocket-client uses hosted MCP at flaude-pro-mcp.fly.dev.
+    const proCheck = await checkProSubscription(normalizedEmail);
+
     const newLicense: License = {
       email: normalizedEmail,
       key: generateLicenseKey(normalizedEmail),
-      plan: 'pro',
+      plan: proCheck.isPro ? 'pro' : 'free',
       activatedAt: Date.now(),
     };
     setLicense(newLicense);
@@ -315,6 +321,7 @@ export function App() {
             onSaveApiKey={() => {}}
             onSaveModel={() => {}}
             onActivateLicense={handleActivateLicense}
+            onActivatePro={handleActivateLicense}
             onDeactivateLicense={handleDeactivateLicense}
             onTestConnection={() => {}}
             onBack={() => setView('chat')}

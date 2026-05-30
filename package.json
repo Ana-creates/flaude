@@ -32,8 +32,11 @@
       "allowedDomains": [
         "https://api.anthropic.com",
         "https://tmuevunmxwmrmluxzayd.supabase.co",
+        "https://lrgwkvmiihatpfiesima.supabase.co",
         "https://fonts.googleapis.com",
-        "https://fonts.gstatic.com"
+        "https://fonts.gstatic.com",
+        "wss://flaude-pro-mcp.fly.dev",
+        "wss://mcp.flaude.app"
       ],
       "devAllowedDomains": [
         "ws://localhost:9876"
