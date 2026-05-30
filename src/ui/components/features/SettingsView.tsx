@@ -122,19 +122,37 @@ export function SettingsView({
     }
   };
 
-  const copyToClipboard = (text: string, which: 'desktop' | 'cli') => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(text).then(
-        () => {
-          setCopiedCommand(which);
-          setTimeout(() => setCopiedCommand(null), 2000);
-        },
-        () => {
-          // fallback for environments without clipboard API
-          setCopiedCommand(which);
-          setTimeout(() => setCopiedCommand(null), 2000);
-        }
-      );
+  const copyToClipboard = async (text: string, which: 'desktop' | 'cli') => {
+    let success = false;
+    // Try modern clipboard API first
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        success = true;
+      }
+    } catch {
+      // Modern API blocked (Figma iframe permission). Fall through to legacy.
+    }
+    // Fallback: textarea + execCommand (works in sandboxed iframes)
+    if (!success) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        success = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {
+        success = false;
+      }
+    }
+    if (success) {
+      setCopiedCommand(which);
+      setTimeout(() => setCopiedCommand(null), 2000);
     }
   };
 
@@ -301,14 +319,146 @@ export function SettingsView({
             </div>
           </div>
 
-          {/* Bottom section - MCP Connection & Email */}
+          {/* Bottom section — Pro: connect Claude action / Free: legacy local-MCP info / No email: prompt */}
           <div style={{ padding: '12px 16px 16px' }}>
-            {hasEmail ? (
+            {hasEmail && isPro ? (
               <>
-                {/* MCP Connection */}
-                <MCPConnection license={license} variant="dark" />
+                {/* Step 1 — Copy URL */}
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    letterSpacing: '0.5px',
+                    color: 'rgba(255,255,255,0.7)',
+                    marginBottom: '6px',
+                    textTransform: 'uppercase',
+                  }}>
+                    Step 1 — Copy your connection URL
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(hostedSseUrl, 'desktop')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      width: '100%',
+                      padding: '12px 16px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      border: 'none',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundColor: copiedCommand === 'desktop' ? 'rgba(34, 197, 94, 0.95)' : '#ffffff',
+                      color: copiedCommand === 'desktop' ? '#ffffff' : '#1a1a1a',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {copiedCommand === 'desktop' ? '✓ Copied!' : 'Copy URL'}
+                  </button>
+                </div>
+
+                {/* Step 2 — Paste it */}
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    letterSpacing: '0.5px',
+                    color: 'rgba(255,255,255,0.7)',
+                    marginBottom: '6px',
+                    textTransform: 'uppercase',
+                  }}>
+                    Step 2 — Paste into Claude
+                  </div>
+                  <p style={{
+                    fontSize: '11px',
+                    color: 'rgba(255,255,255,0.85)',
+                    margin: 0,
+                    lineHeight: 1.5,
+                  }}>
+                    Open Claude Desktop or Claude.ai → <strong>Settings → Connectors</strong> → Add custom connector → paste. Restart Claude.
+                  </p>
+                </div>
+
+                {/* Step 3 — confirmation */}
+                <div style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                  border: '1px solid rgba(34, 197, 94, 0.4)',
+                  marginBottom: '12px',
+                }}>
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: 'rgba(220, 252, 231, 1)',
+                    marginBottom: '2px',
+                  }}>
+                    ✓ You're all set
+                  </div>
+                  <p style={{
+                    fontSize: '10px',
+                    color: 'rgba(220, 252, 231, 0.85)',
+                    margin: 0,
+                    lineHeight: 1.4,
+                  }}>
+                    Once Claude connects, ask it anything — designs appear in this Figma file.
+                  </p>
+                </div>
+
+                {/* Secondary: CLI for Claude Code users */}
+                <button
+                  onClick={() => copyToClipboard(cliCommand, 'cli')}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: '6px',
+                    fontSize: '10px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: copiedCommand === 'cli' ? 'rgba(34, 197, 94, 0.95)' : 'rgba(255,255,255,0.55)',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    textUnderlineOffset: '2px',
+                  }}
+                >
+                  {copiedCommand === 'cli' ? '✓ Copied CLI command' : 'Using Claude Code instead? Copy CLI command'}
+                </button>
 
                 {/* Email display */}
+                <div style={{
+                  marginTop: '14px',
+                  paddingTop: '10px',
+                  borderTop: '1px solid rgba(255,255,255,0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.9)' }}>
+                    {license!.email}
+                  </span>
+                  <button
+                    onClick={onDeactivateLicense}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '10px',
+                      border: 'none',
+                      borderRadius: '4px',
+                      backgroundColor: 'transparent',
+                      color: 'rgba(255, 255, 255, 0.5)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </>
+            ) : hasEmail ? (
+              <>
+                {/* Free user with email — show legacy local MCP info */}
+                <MCPConnection license={license} variant="dark" />
+
                 <div style={{
                   marginTop: '12px',
                   display: 'flex',
@@ -350,93 +500,9 @@ export function SettingsView({
         </div>
 
         {/* ─────────────────────────────────────────────── */}
-        {/* PRO UPGRADE / CONNECTED — appended bf259fe restore */}
+        {/* FREE USER ONLY — Pro upgrade card (Pro users see all actions in the gradient card above) */}
         {/* ─────────────────────────────────────────────── */}
-        {isPro ? (
-          /* PRO USER — Show "how to connect Claude" with one-click copy */
-          <div style={{
-            padding: '16px',
-            marginBottom: '16px',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid rgba(251, 191, 36, 0.3)',
-            backgroundColor: 'rgba(251, 191, 36, 0.04)',
-          }}>
-            <div style={{ marginBottom: '10px' }}>
-              <span style={{
-                fontSize: '13px',
-                fontWeight: 600,
-                color: 'var(--figma-color-text)',
-              }}>
-                Connect Claude to Flaude
-              </span>
-              <p style={{
-                fontSize: '11px',
-                color: 'var(--figma-color-text-secondary)',
-                margin: '4px 0 0',
-                lineHeight: 1.4,
-              }}>
-                Paste this URL into Claude Desktop or Claude.ai → Settings → Connectors.
-                Or use the CLI command for Claude Code.
-              </p>
-            </div>
-
-            {/* Copy URL for Claude Desktop / Claude.ai */}
-            <div style={{ marginBottom: '8px' }}>
-              <button
-                onClick={() => copyToClipboard(hostedSseUrl, 'desktop')}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  padding: '10px 12px',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  textAlign: 'left',
-                  border: '1px solid var(--card-border)',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--figma-color-bg)',
-                  color: 'var(--figma-color-text)',
-                  cursor: 'pointer',
-                  fontFamily: 'monospace',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  boxSizing: 'border-box',
-                }}
-                title="Copy URL for Claude Desktop / Claude.ai"
-              >
-                {copiedCommand === 'desktop' ? '✓ Copied for Claude Desktop / Claude.ai' : '📋 Copy URL for Claude Desktop / Claude.ai'}
-              </button>
-            </div>
-
-            {/* Copy CLI command for Claude Code */}
-            <div>
-              <button
-                onClick={() => copyToClipboard(cliCommand, 'cli')}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  padding: '10px 12px',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  textAlign: 'left',
-                  border: '1px solid var(--card-border)',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--figma-color-bg)',
-                  color: 'var(--figma-color-text)',
-                  cursor: 'pointer',
-                  fontFamily: 'monospace',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  boxSizing: 'border-box',
-                }}
-                title="Copy CLI command for Claude Code"
-              >
-                {copiedCommand === 'cli' ? '✓ Copied for Claude Code' : '📋 Copy command for Claude Code'}
-              </button>
-            </div>
-          </div>
-        ) : (
+        {!isPro && (
           /* FREE USER — Show Subscribe + Activate flow */
           <div style={{
             padding: '16px',
