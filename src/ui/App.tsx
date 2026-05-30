@@ -89,6 +89,20 @@ export function App() {
     }
   }, [license?.email]);
 
+  // Auto-connect the WebSocket whenever we have a Pro license.
+  // (Free users have to opt in via the legacy MCPConnection Connect button
+  // because their MCP runs locally and may not be started yet.)
+  useEffect(() => {
+    mcpClient.setLicense(license);
+    if (license?.plan === 'pro' && license.email) {
+      console.log('[Flaude] Pro license detected — auto-connecting to hosted MCP');
+      mcpClient.connect();
+    } else {
+      // Disconnect if license was cleared or downgraded
+      mcpClient.disconnect();
+    }
+  }, [license?.plan, license?.email]);
+
 
 
   // === License handlers ===
