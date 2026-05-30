@@ -234,6 +234,114 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     }
     throw new Error(`Page not found: ${params.pageId || params.pageName}`);
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // MCP "swiss army" commands — these match what the hosted MCP server's
+  // figma_execute / figma_screenshot / figma_status / figma_navigate tools
+  // send over the wire. Without these, the hosted MCP can call the plugin
+  // but the plugin rejects the message as "Unknown command".
+  // ──────────────────────────────────────────────────────────────────────
+
+  // figma_execute: run arbitrary JS in the Figma plugin context with `figma` global.
+  // Code is wrapped in an async IIFE so callers can use `await` and `return`.
+  execute: async (params) => {
+    const code = params.code as string;
+    if (typeof code !== 'string' || !code.trim()) {
+      throw new Error('execute requires a non-empty `code` string');
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      const fn = new Function('figma', `return (async () => { ${code} })()`);
+      const result = await fn(figma);
+      // Return JSON-serializable data only
+      return result === undefined ? null : result;
+    } catch (err) {
+      throw new Error(`execute failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  },
+
+  // figma_screenshot: export a node (or current selection) as a base64 PNG.
+  screenshot: async (params) => {
+    const scale = (params.scale as number) || 1;
+    let node: SceneNode | null = null;
+    if (params.nodeId) {
+      const found = figma.getNodeById(params.nodeId as string);
+      if (found && 'exportAsync' in found) node = found as SceneNode;
+    } else {
+      const sel = figma.currentPage.selection[0];
+      if (sel) node = sel;
+    }
+    if (!node) {
+      throw new Error('No node to screenshot: pass nodeId or select a node in Figma');
+    }
+    const bytes = await node.exportAsync({
+      format: 'PNG',
+      constraint: { type: 'SCALE', value: scale },
+    });
+    // Convert Uint8Array → base64
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const imageBase64 = btoa(binary);
+    return {
+      imageBase64,
+      nodeId: node.id,
+      nodeName: node.name,
+      width: 'width' in node ? node.width : null,
+      height: 'height' in node ? node.height : null,
+    };
+  },
+
+  // figma_status: report current page, selection, document info.
+  get_status: () => {
+    const sel = figma.currentPage.selection;
+    return {
+      connected: true,
+      fileName: figma.root.name,
+      currentPage: {
+        id: figma.currentPage.id,
+        name: figma.currentPage.name,
+        childCount: figma.currentPage.children.length,
+      },
+      selection: sel.map((n) => ({
+        id: n.id,
+        name: n.name,
+        type: n.type,
+        ...(('width' in n) ? { width: n.width, height: n.height } : {}),
+      })),
+      pages: figma.root.children.map((p) => ({ id: p.id, name: p.name })),
+    };
+  },
+
+  // figma_navigate: scroll/zoom viewport to a node, and/or switch page.
+  navigate: (params) => {
+    const { nodeId, pageId, pageName } = params as {
+      nodeId?: string;
+      pageId?: string;
+      pageName?: string;
+    };
+
+    if (pageId || pageName) {
+      const page = figma.root.children.find(
+        (p) => p.id === pageId || p.name === pageName
+      );
+      if (!page) throw new Error(`Page not found: ${pageId || pageName}`);
+      figma.currentPage = page;
+    }
+
+    if (nodeId) {
+      const node = figma.getNodeById(nodeId);
+      if (!node) throw new Error(`Node not found: ${nodeId}`);
+      if ('x' in node) {
+        figma.viewport.scrollAndZoomIntoView([node as SceneNode]);
+      }
+    }
+
+    return {
+      success: true,
+      currentPageId: figma.currentPage.id,
+      currentPageName: figma.currentPage.name,
+    };
+  },
 };
 
 /**
