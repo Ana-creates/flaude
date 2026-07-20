@@ -1313,6 +1313,9 @@ export function makeHugPillButton(params: {
 export function verifyLayout(params: {
   assertions: Array<Record<string, unknown>>;
 }) {
+  if (!Array.isArray(params.assertions)) {
+    throw new Error('verify_layout requires an `assertions` array');
+  }
   const results: Array<Record<string, unknown>> = [];
   let passed = 0;
   for (const a of params.assertions) {
