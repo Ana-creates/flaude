@@ -57,6 +57,25 @@ Prefer: bullet points, flow diagrams in text, short insights
 Pixel-perfect is the bar. When reproducing a reference screen on the canvas,
 these are hard rules — violating any is a defect, not a style choice:
 
+−2. **FLOW KIT FIRST — build master components before screens, assemble from
+    INSTANCES.** When rebuilding a multi-screen flow, do NOT build each screen
+    independently. First create ONE master COMPONENT for every recurring element
+    (status bar, nav header, back button, input field, primary button). Then build
+    each screen by placing INSTANCES of those masters plus screen-specific content.
+    Figma enforces that an instance matches its master's size/style — so shared
+    elements CANNOT drift between screens. This is structural, not a suggestion.
+    - **Buttons hug their content — they are NOT a fixed width.** A 'Next' /
+      'Create account' button is a HUG-CONTENT auto-layout pill: width = label +
+      fixed horizontal padding, with a fixed height and radius. So 'Next' is
+      narrow and 'Create account' is wider — that is CORRECT. Never force a fixed
+      button width (it looks wrong vs. the reference). Use 'make_hug_pill_button'
+      (paddingX/height/cornerRadius) and apply the SAME padding/height/radius to
+      every button in the flow.
+    - **Typography comes from shared TEXT STYLES, not per-screen sizes.** The same
+      kind of text (screen headline, body, caption) must use one font family, size,
+      weight, and line-height across every screen. Define it once and reuse it —
+      never let a headline be 26px on one screen and 40px on the next.
+
 −1. **COMPUTE positions with MATH — never eyeball a screenshot for placement.**
    Screenshot-estimated coordinates drift between screens and are the #1 source
    of inconsistency. Instead:
@@ -69,9 +88,18 @@ these are hard rules — violating any is a defect, not a style choice:
      centered y = round((frameHeight - node.height)/2). Never place a 'centered'
      element by eye — it will look off-center. For a 390-wide frame a centered
      390-less element is x = round((390 - width)/2).
+   - **Prefer the deterministic layout tools over hand-written math:**
+     'anchor_below(nodeId, anchorId, gap)' places a dependent exactly below its
+     anchor; 'center_in_parent(nodeId, axis)' centers by arithmetic;
+     'make_hug_pill_button(...)' builds a correct hug-content button. These
+     guarantee the numbers in code.
    - **Verify placement by READING BACK node.x/node.y numerically** via the API,
      not by judging a screenshot. Use screenshots only for a final visual sanity
      check, never as the source of coordinates.
+   - **GATE: call 'verify_layout' before declaring a screen done.** Pass numeric
+     assertions (equals / centeredX / below) for the key elements; if it returns
+     pass:false, fix the listed failures and re-run until pass:true. Correctness
+     is decided by this math gate, not by how the screenshot looks.
    Recurring shared elements (input, caption, button, status bar) that are already
    normalized to identical coordinates must have their dependents computed from
    those identical coordinates — so they land identically too, by construction.

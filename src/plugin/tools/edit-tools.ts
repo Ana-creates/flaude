@@ -1196,3 +1196,159 @@ export function validateAgainstSchema(params: {
     count: frames.length,
   };
 }
+
+// ============= DETERMINISTIC LAYOUT TOOLS =============
+// These do the MATH in code so the agent never has to eyeball a screenshot for
+// placement. The agent declares INTENT ("anchor caption below input", "center
+// this dialog", "make this a hug-content pill") and the code guarantees exact,
+// repeatable numbers — eliminating cross-screen drift by construction.
+
+function sceneById(nodeId: string): SceneNode {
+  const n = figma.getNodeById(nodeId);
+  if (!n) throw new Error(`Node not found: ${nodeId}`);
+  if (!('x' in n)) throw new Error(`Node is not positionable: ${nodeId}`);
+  return n as SceneNode;
+}
+
+/**
+ * Position `nodeId` directly below `anchorId` with an exact gap, computed from
+ * the anchor's real y+height. Optionally align x to the anchor. Use this for
+ * helper/caption text under an input, a button under content, etc. — so the
+ * dependent lands identically on every screen where the anchor is identical.
+ */
+export function anchorBelow(params: {
+  nodeId: string;
+  anchorId: string;
+  gap?: number;
+  matchX?: boolean;
+}) {
+  const node = sceneById(params.nodeId);
+  const anchor = sceneById(params.anchorId);
+  const gap = params.gap ?? 10;
+  const newY = Math.round(anchor.y + anchor.height + gap);
+  node.y = newY;
+  if (params.matchX) node.x = Math.round(anchor.x);
+  return {
+    nodeId: node.id,
+    computed: { y: newY, x: node.x, gap, anchorBottom: Math.round(anchor.y + anchor.height) },
+  };
+}
+
+/**
+ * Center `nodeId` inside its parent frame (or an explicit container) using exact
+ * arithmetic. Never place a "centered" element by eye.
+ */
+export function centerInParent(params: {
+  nodeId: string;
+  axis?: 'horizontal' | 'vertical' | 'both';
+  containerId?: string;
+}) {
+  const node = sceneById(params.nodeId);
+  const container = params.containerId
+    ? sceneById(params.containerId)
+    : (node.parent && 'width' in node.parent ? node.parent as unknown as SceneNode : null);
+  if (!container) throw new Error('No container with dimensions to center within');
+  const axis = params.axis ?? 'both';
+  const out: Record<string, number> = {};
+  if (axis === 'horizontal' || axis === 'both') {
+    node.x = Math.round((container.width - node.width) / 2);
+    out.x = node.x;
+  }
+  if (axis === 'vertical' || axis === 'both') {
+    node.y = Math.round((container.height - node.height) / 2);
+    out.y = node.y;
+  }
+  return { nodeId: node.id, containerId: container.id, computed: out };
+}
+
+/**
+ * Turn a button frame into a HUG-CONTENT auto-layout pill: width follows its
+ * label + fixed horizontal padding, with a fixed height and corner radius. This
+ * is the correct model for buttons like Spotify's 'Next'/'Create account' — they
+ * are NOT a fixed width; they hug their text. Applying the SAME padding/height/
+ * radius to every button instance keeps them consistent while widths vary
+ * correctly with the label.
+ */
+export function makeHugPillButton(params: {
+  nodeId: string;
+  paddingX?: number;
+  height?: number;
+  cornerRadius?: number;
+}) {
+  const node = figma.getNodeById(params.nodeId);
+  if (!node || node.type !== 'FRAME') {
+    throw new Error(`makeHugPillButton needs a FRAME node: ${params.nodeId}`);
+  }
+  const frame = node as FrameNode;
+  const paddingX = params.paddingX ?? 32;
+  const height = params.height ?? 52;
+  frame.layoutMode = 'HORIZONTAL';
+  frame.primaryAxisSizingMode = 'AUTO';   // width hugs contents
+  frame.counterAxisSizingMode = 'FIXED';  // fixed height
+  frame.primaryAxisAlignItems = 'CENTER';
+  frame.counterAxisAlignItems = 'CENTER';
+  frame.paddingLeft = paddingX;
+  frame.paddingRight = paddingX;
+  frame.paddingTop = 0;
+  frame.paddingBottom = 0;
+  frame.resize(frame.width, height);
+  frame.cornerRadius = params.cornerRadius ?? Math.round(height / 2);
+  return {
+    nodeId: frame.id,
+    spec: { paddingX, height, cornerRadius: frame.cornerRadius, widthNow: Math.round(frame.width) },
+    note: 'Width now hugs the label; height/padding/radius are locked. Apply identical values to every button in the flow.',
+  };
+}
+
+/**
+ * Deterministic pass/fail gate. Runs numeric assertions against the live node
+ * coordinates and returns which passed/failed with exact diffs. Call this BEFORE
+ * declaring a screen done — correctness is decided by math, not by a screenshot.
+ *
+ * assertions: array of checks, each one of:
+ *   { type:'equals', nodeId, prop:'x'|'y'|'width'|'height', value, tolerance? }
+ *   { type:'centeredX', nodeId, containerId, tolerance? }
+ *   { type:'below', nodeId, anchorId, gap, tolerance? }
+ */
+export function verifyLayout(params: {
+  assertions: Array<Record<string, unknown>>;
+}) {
+  const results: Array<Record<string, unknown>> = [];
+  let passed = 0;
+  for (const a of params.assertions) {
+    const tol = (a.tolerance as number) ?? 1;
+    try {
+      const node = sceneById(a.nodeId as string);
+      let ok = false;
+      let detail: Record<string, unknown> = {};
+      if (a.type === 'equals') {
+        const actual = (node as unknown as Record<string, number>)[a.prop as string];
+        ok = Math.abs(actual - (a.value as number)) <= tol;
+        detail = { prop: a.prop, expected: a.value, actual: Math.round(actual) };
+      } else if (a.type === 'centeredX') {
+        const c = sceneById(a.containerId as string);
+        const expected = Math.round((c.width - node.width) / 2);
+        ok = Math.abs(node.x - expected) <= tol;
+        detail = { expectedX: expected, actualX: Math.round(node.x) };
+      } else if (a.type === 'below') {
+        const anchor = sceneById(a.anchorId as string);
+        const expected = Math.round(anchor.y + anchor.height + ((a.gap as number) ?? 10));
+        ok = Math.abs(node.y - expected) <= tol;
+        detail = { expectedY: expected, actualY: Math.round(node.y) };
+      } else {
+        detail = { error: `unknown assertion type: ${a.type}` };
+      }
+      if (ok) passed++;
+      results.push({ ...detail, type: a.type, nodeId: a.nodeId, pass: ok });
+    } catch (err) {
+      results.push({ type: a.type, nodeId: a.nodeId, pass: false, error: String(err) });
+    }
+  }
+  return {
+    pass: passed === params.assertions.length,
+    passed,
+    total: params.assertions.length,
+    failures: results.filter(r => !r.pass),
+    results,
+  };
+}

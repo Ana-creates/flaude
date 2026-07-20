@@ -31,6 +31,10 @@ import {
   groupNodes,
   createScreenFromState,
   validateAgainstSchema,
+  anchorBelow,
+  centerInParent,
+  makeHugPillButton,
+  verifyLayout,
 } from '../tools/edit-tools';
 
 type CommandHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -188,6 +192,28 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
       subtext?: string;
       tone?: string;
     } | undefined,
+  }),
+
+  // Deterministic layout tools — math in code, no screenshot eyeballing.
+  anchor_below: (params) => anchorBelow({
+    nodeId: params.nodeId as string,
+    anchorId: params.anchorId as string,
+    gap: params.gap as number | undefined,
+    matchX: params.matchX as boolean | undefined,
+  }),
+  center_in_parent: (params) => centerInParent({
+    nodeId: params.nodeId as string,
+    axis: params.axis as 'horizontal' | 'vertical' | 'both' | undefined,
+    containerId: params.containerId as string | undefined,
+  }),
+  make_hug_pill_button: (params) => makeHugPillButton({
+    nodeId: params.nodeId as string,
+    paddingX: params.paddingX as number | undefined,
+    height: params.height as number | undefined,
+    cornerRadius: params.cornerRadius as number | undefined,
+  }),
+  verify_layout: (params) => verifyLayout({
+    assertions: params.assertions as Array<Record<string, unknown>>,
   }),
 
   validate_against_schema: (params) => validateAgainstSchema({
