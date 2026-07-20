@@ -56,6 +56,18 @@ Prefer: bullet points, flow diagrams in text, short insights
 ### Recreation Fidelity (when BUILDING/rebuilding a screen from a reference)
 Pixel-perfect is the bar. When reproducing a reference screen on the canvas,
 these are hard rules — violating any is a defect, not a style choice:
+
+0. **THE GOLDEN RULE — match every element's ABSOLUTE position to the reference.**
+   For EVERY element (title, input, helper/caption text, button, notification,
+   dialog, image), measure its exact x and y FROM THE TOP-LEFT of the reference
+   frame and place your element at that same x/y. Do NOT "lay it out so it looks
+   right" — reproduce the reference's exact coordinates. This single rule prevents
+   the most common defect: elements that look fine alone but sit at different
+   heights across screens (e.g. a helper caption at y=210 on one screen and y=300
+   on the next, or a button that floats). If you cannot measure a coordinate,
+   screenshot the reference and estimate the y as a fraction of the 844px height,
+   then verify by overlaying. Every element, every screen, absolute-positioned to
+   its reference. The rules below are specific consequences of this one.
 1. **Reuse native platform assets — never hand-build them.** The iOS/Android
    keyboard, status bar (time/signal/wifi/battery), home indicator, system
    date/gender pickers, permission & App-Tracking dialogs, and tab bars already
@@ -75,9 +87,12 @@ these are hard rules — violating any is a defect, not a style choice:
 5. **Verify colors by sampling reference pixels**, not by assumption — background,
    primary, text, input fill, and every accent.
 6. **Shared elements: build ONCE, reuse as INSTANCES — with locked dimensions.**
-   Any element that recurs across screens of a flow (input field, primary/CTA
-   button, status bar, back button, nav header, tab bar) must be pixel-identical
-   on EVERY screen. Rules:
+   Any element that recurs across screens of a flow (input field, the primary/CTA
+   button such as a 'Next'/'Continue' button, status bar, back button, nav
+   header, tab bar) must be pixel-identical on EVERY screen — the SAME width,
+   height, and corner radius everywhere, even if its vertical position legitimately
+   differs per reference. A 'Next' button that is one size on one screen and a
+   different size on the next is a defect. Rules:
    - Create it as a single MASTER COMPONENT the first time, then place INSTANCES
      on every other screen. NEVER rebuild it per-screen — independent rebuilds
      drift (e.g. an input that's 48px tall on one screen and 64px on the next).
