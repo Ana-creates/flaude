@@ -52,6 +52,71 @@ Prefer: bullet points, flow diagrams in text, short insights
 - map_user_flows gives you most info in one call
 - Don't call get_all_screens if you're calling map_user_flows
 - Synthesize response from first tool results when possible
+
+### Recreation Fidelity (when BUILDING/rebuilding a screen from a reference)
+Pixel-perfect is the bar. When reproducing a reference screen on the canvas,
+these are hard rules — violating any is a defect, not a style choice:
+1. **Reuse native platform assets — never hand-build them.** The iOS/Android
+   keyboard, status bar (time/signal/wifi/battery), home indicator, system
+   date/gender pickers, permission & App-Tracking dialogs, and tab bars already
+   exist as reusable assets. INSERT the existing asset — never redraw system
+   chrome from scratch (e.g. never build 30+ individual keyboard keys). Only
+   hand-build genuinely app-specific content.
+2. **Match position exactly.** Measure each control's X/Y from the reference and
+   place it there. The primary CTA (e.g. "Next") goes exactly where the
+   reference puts it — if it sits directly under the input, keep it there; do
+   NOT relocate it to the screen bottom. Preserve vertical order and spacing.
+3. **Match dimensions exactly.** Input height, button size, corner radius, and
+   padding must equal the reference's measured values. Do NOT inflate input
+   height (a common failure).
+4. **Match icon orientation.** Icons like the hide-password eye-slash have a
+   specific slash direction — never mirror or reverse them. Verify every icon
+   against the reference. Prefer real glyphs over primitive vector approximations.
+5. **Verify colors by sampling reference pixels**, not by assumption — background,
+   primary, text, input fill, and every accent.
+6. **Shared elements: build ONCE, reuse as INSTANCES — with locked dimensions.**
+   Any element that recurs across screens of a flow (input field, primary/CTA
+   button, status bar, back button, nav header, tab bar) must be pixel-identical
+   on EVERY screen. Rules:
+   - Create it as a single MASTER COMPONENT the first time, then place INSTANCES
+     on every other screen. NEVER rebuild it per-screen — independent rebuilds
+     drift (e.g. an input that's 48px tall on one screen and 64px on the next).
+   - Lock the exact numbers. Before building, decide the canonical height /
+     width / corner-radius / padding for each shared element and write those
+     literal values into every instance. Do not "eyeball" per screen.
+   - Standard frame size is fixed too: every screen frame in one platform flow
+     is the SAME dimensions (e.g. iOS 390x844). Never let one frame grow.
+   - If two instances differ by even a few px, that is a defect — normalize them
+     all to the canonical spec and re-screenshot to confirm they match.
+7. **Lock shared TYPOGRAPHY and VERTICAL RHYTHM across the flow.** Recurring text
+   roles must be identical on every screen: the same screen-title/headline uses
+   the SAME font family, size, weight, and line-height everywhere (e.g. every
+   "Create account"-style H1 is the same size — never 28 on one screen and 32 on
+   the next). The GAP between a headline and the element under it (input/box)
+   must be the same value on every screen that shares that pattern. Pick canonical
+   type sizes and gap values up front and apply them to all screens; drift in
+   heading size or heading-to-input spacing is a defect.
+8. **Real images are mandatory — never leave empty/placeholder tiles.** When a
+   reference screen shows people, artists, albums, or photos (e.g. an artist grid),
+   web-search each item by the exact name visible on the screen (e.g. "The
+   Neighbourhood band", "Cigarettes After Sex", "BTS") and set the real photo as
+   the tile's image fill. A tile rendered as a flat colored circle/rectangle with
+   no image is a defect. Verify every image tile actually has an image fill before
+   declaring done.
+9. **Reuse the icon library — never hand-draw an icon that already exists.** The
+   file contains a local icon library (components on the 'Icons' page, named
+   'icon / <name> / <style>', e.g. 'icon / call / linear'). BEFORE drawing any
+   icon as vectors, search local components for a matching icon and place an
+   INSTANCE of it:
+     const icons = figma.root.findAllWithCriteria({ types: ['COMPONENT'] })
+       .filter(c => c.name.toLowerCase().startsWith('icon /'));
+     // match by name/keyword, then: const inst = match.createInstance();
+   Only fall back to figma.createVector() if NO matching icon component exists in
+   the file. Hand-drawing an icon that's already in the library (wrong stroke
+   weight, off proportions, slow) is a defect. Match the icon style (linear /
+   outline / bold) to what the reference uses.
+After building, screenshot and compare against the reference, then fix and
+re-check all six points. Do not declare a build complete until all six pass.
 `;
 
 export const SYSTEM_PROMPTS = {
