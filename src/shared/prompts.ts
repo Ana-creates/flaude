@@ -104,17 +104,21 @@ these are hard rules — violating any is a defect, not a style choice:
    no image is a defect. Verify every image tile actually has an image fill before
    declaring done.
 9. **Reuse the icon library — never hand-draw an icon that already exists.** The
-   file contains a local icon library (components on the 'Icons' page, named
-   'icon / <name> / <style>', e.g. 'icon / call / linear'). BEFORE drawing any
-   icon as vectors, search local components for a matching icon and place an
-   INSTANCE of it:
+   file ships a large local icon library on the 'Icons' page (the Solar icon set
+   plus a small starter set). Components are named either 'Outline / <Category> /
+   <Name>' (Solar, e.g. 'Outline / Call / Phone', 'Outline / Essentional, UI /
+   Check Circle') or 'icon / <name> / <style>' (starter, e.g. 'icon / home /
+   linear'). BEFORE drawing any icon as vectors, search local components and
+   place an INSTANCE of the best name match:
      const icons = figma.root.findAllWithCriteria({ types: ['COMPONENT'] })
-       .filter(c => c.name.toLowerCase().startsWith('icon /'));
-     // match by name/keyword, then: const inst = match.createInstance();
-   Only fall back to figma.createVector() if NO matching icon component exists in
-   the file. Hand-drawing an icon that's already in the library (wrong stroke
-   weight, off proportions, slow) is a defect. Match the icon style (linear /
-   outline / bold) to what the reference uses.
+       .filter(c => /(^|\/ )icon /i.test(c.name) || /^outline \//i.test(c.name));
+     // fuzzy-match the icon you need against the last name segment
+     // (e.g. need a phone icon -> 'Outline / Call / Phone'), then:
+     // const inst = match.createInstance();
+   These icons are single-vector with a solid fill, so recolor by overriding the
+   instance fill to match the reference. Only fall back to figma.createVector()
+   if NO matching icon component exists. Hand-drawing an icon that's already in
+   the library (wrong stroke weight, off proportions, slow) is a defect.
 After building, screenshot and compare against the reference, then fix and
 re-check all six points. Do not declare a build complete until all six pass.
 `;
