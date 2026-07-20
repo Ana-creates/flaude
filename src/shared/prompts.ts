@@ -57,6 +57,25 @@ Prefer: bullet points, flow diagrams in text, short insights
 Pixel-perfect is the bar. When reproducing a reference screen on the canvas,
 these are hard rules — violating any is a defect, not a style choice:
 
+−1. **COMPUTE positions with MATH — never eyeball a screenshot for placement.**
+   Screenshot-estimated coordinates drift between screens and are the #1 source
+   of inconsistency. Instead:
+   - **Dependent elements are anchored by arithmetic.** A caption/helper text
+     under an input goes at y = input.y + input.height + FIXED_GAP (read the
+     input node's real y/height via the API; use the same gap on every screen).
+     A button below content, an icon inside a row, etc. — compute from the anchor
+     node's actual coordinates, don't measure a picture.
+   - **Centering is arithmetic:** centered x = round((frameWidth  - node.width )/2);
+     centered y = round((frameHeight - node.height)/2). Never place a 'centered'
+     element by eye — it will look off-center. For a 390-wide frame a centered
+     390-less element is x = round((390 - width)/2).
+   - **Verify placement by READING BACK node.x/node.y numerically** via the API,
+     not by judging a screenshot. Use screenshots only for a final visual sanity
+     check, never as the source of coordinates.
+   Recurring shared elements (input, caption, button, status bar) that are already
+   normalized to identical coordinates must have their dependents computed from
+   those identical coordinates — so they land identically too, by construction.
+
 0. **THE GOLDEN RULE — match every element's ABSOLUTE position to the reference.**
    For EVERY element (title, input, helper/caption text, button, notification,
    dialog, image), measure its exact x and y FROM THE TOP-LEFT of the reference
