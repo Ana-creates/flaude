@@ -199,8 +199,16 @@ RECURRING-DEFECTS GATE — before declaring ANY screen done, resolve each and re
      node.rotation to the measured tilt; preserve card COUNT and glossy finish (4 stays 4, smaller).
   D) No placeholders: every logo/avatar/photo is a REAL sourced image fill — an empty/overlapping box is a fail.
   E) System chrome: status-bar content is DARK on light backgrounds and LIGHT on dark; match the ref.
-After building, screenshot and compare against the reference SIDE BY SIDE, then fix and
-re-check all points (six original + A–E). Do not declare a build complete until all pass.
+EFFICIENCY & TRUST (mandatory):
+  - A numeric/geometry gate can only REJECT, never APPROVE — a perfect score means nothing about
+    fidelity (screens have scored 100 while showing wrong content / hand-drawn icons). Only a final
+    visual check against the reference IMAGE marks a screen done, and numbers never override it.
+  - Capture the reference image ONCE and hold it; NEVER re-screenshot a REF frame (it is just the
+    reference image you already have). In Figma, screenshot ONLY what you build, compared to the held reference.
+  - Look once (extract numbers + sample colors/rotation/counts), build once, verify once; if it fails make
+    ONE targeted fix — no unbounded screenshot->fix->screenshot loop.
+  - Work from the reference IMAGE, not the frame NAME (names can be mislabeled).
+Do not declare a build complete until the final visual check against the reference passes.
 `;
 
 export const SYSTEM_PROMPTS = {
