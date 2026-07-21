@@ -186,8 +186,21 @@ these are hard rules — violating any is a defect, not a style choice:
    user (that API exposes variables only and is not permitted). Instead clone from an
    existing instance's master (const m = await inst.getMainComponentAsync(); m.createInstance()),
    or source a matching SVG icon by URL. Hand-draw only as a last resort.
-After building, screenshot and compare against the reference, then fix and
-re-check all six points. Do not declare a build complete until all six pass.
+RECURRING-DEFECTS GATE — before declaring ANY screen done, resolve each and report PASS/FAIL:
+  A) Icons/nav: every nav + tab-bar glyph is a library INSTANCE (never hand-drawn); build the
+     bottom nav/tab bar as ONE component and MATCH THE REFERENCE'S SHAPE (flat / floating pill /
+     curved-notched) — never a plain rectangle when the ref is curved; match the active-item pill.
+     Top bars sit flush at the top, items on the correct baseline.
+  B) Text: every text node's x, y AND fontSize/weight are MEASURED from the reference, not eyeballed.
+     Text drifting inside a card/box is a fail.
+  C) Signature visuals (gradient/glow/blur/rotation/stacked-glossy-cards/custom shape): do NOT
+     approximate. SAMPLE real colors from the reference image at several points and reuse those exact
+     values + stop positions; glows are tight radial cores fading out (not diffuse blobs); set
+     node.rotation to the measured tilt; preserve card COUNT and glossy finish (4 stays 4, smaller).
+  D) No placeholders: every logo/avatar/photo is a REAL sourced image fill — an empty/overlapping box is a fail.
+  E) System chrome: status-bar content is DARK on light backgrounds and LIGHT on dark; match the ref.
+After building, screenshot and compare against the reference SIDE BY SIDE, then fix and
+re-check all points (six original + A–E). Do not declare a build complete until all pass.
 `;
 
 export const SYSTEM_PROMPTS = {
