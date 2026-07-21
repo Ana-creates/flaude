@@ -10,7 +10,9 @@ import {
   saveUserEmail,
   activateProSubscription,
   REVOLUT_PAYMENT_LINK,
+  REVOLUT_MONTHLY_LINK,
   FLAUDE_PRICE,
+  FLAUDE_MONTHLY_PRICE,
 } from '../../api/supabase';
 import mascotUrl from '../../assets/mascot.png';
 import proGradientUrl from '../../assets/pro-gradient.jpg';
@@ -538,7 +540,7 @@ export function SettingsView({
               </p>
             </div>
 
-            {/* Subscribe button */}
+            {/* Subscribe button — lifetime (primary) */}
             <a
               href={REVOLUT_PAYMENT_LINK}
               target="_blank"
@@ -548,7 +550,7 @@ export function SettingsView({
                 display: 'block',
                 width: '100%',
                 padding: '10px 16px',
-                marginBottom: '8px',
+                marginBottom: '6px',
                 fontSize: '12px',
                 fontWeight: 600,
                 textAlign: 'center',
@@ -561,7 +563,33 @@ export function SettingsView({
                 boxSizing: 'border-box',
               }}
             >
-              {hasClickedPay ? `✓ Opened — pay ${FLAUDE_PRICE} via Revolut` : `Subscribe (${FLAUDE_PRICE}) →`}
+              {hasClickedPay ? `✓ Opened — pay ${FLAUDE_PRICE} via Revolut` : `Get lifetime (${FLAUDE_PRICE}) →`}
+            </a>
+
+            {/* Monthly subscription — secondary */}
+            <a
+              href={REVOLUT_MONTHLY_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setHasClickedPay(true)}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '9px 16px',
+                marginBottom: '8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                textAlign: 'center',
+                textDecoration: 'none',
+                borderRadius: 'var(--radius-md)',
+                background: 'transparent',
+                color: 'var(--figma-color-text)',
+                border: '1px solid var(--card-border)',
+                cursor: 'pointer',
+                boxSizing: 'border-box',
+              }}
+            >
+              Or subscribe monthly ({FLAUDE_MONTHLY_PRICE}/mo) →
             </a>
 
             {/* Activate section */}

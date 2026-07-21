@@ -181,6 +181,11 @@ these are hard rules — violating any is a defect, not a style choice:
    instance fill to match the reference. Only fall back to figma.createVector()
    if NO matching icon component exists. Hand-drawing an icon that's already in
    the library (wrong stroke weight, off proportions, slow) is a defect.
+   If the file's icons live in a shared/TEAM library rather than locally, do NOT call
+   figma.teamLibrary.* or report a "team libraries / manifest permission" error to the
+   user (that API exposes variables only and is not permitted). Instead clone from an
+   existing instance's master (const m = await inst.getMainComponentAsync(); m.createInstance()),
+   or source a matching SVG icon by URL. Hand-draw only as a last resort.
 After building, screenshot and compare against the reference, then fix and
 re-check all six points. Do not declare a build complete until all six pass.
 `;

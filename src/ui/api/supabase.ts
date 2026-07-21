@@ -14,10 +14,13 @@ const EMAIL_SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
 const SUBSCRIPTION_SUPABASE_URL = SUPABASE_URL;
 const SUBSCRIPTION_SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
 
-// Revolut Payment Link — customers click this to buy Pro
+// Revolut Payment Links — customers click these to buy Pro
 export const REVOLUT_PAYMENT_LINK =
   'https://checkout.revolut.com/pay/fe98f40c-fd93-41cf-82fd-a34a204fabca';
-export const FLAUDE_PRICE = '$45';
+export const REVOLUT_MONTHLY_LINK =
+  'https://checkout.revolut.com/pay/0f17f7c5-508e-4f2b-b75e-8dcea4d8b654';
+export const FLAUDE_PRICE = '$25';
+export const FLAUDE_MONTHLY_PRICE = '$5.99';
 
 // Cache subscription checks for an hour to reduce API calls on plugin startup
 const SUBSCRIPTION_CACHE_TTL = 60 * 60 * 1000;
