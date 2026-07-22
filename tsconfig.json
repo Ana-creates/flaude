@@ -4,6 +4,7 @@
     "target": "ES2022",
     "strict": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
       "react": ["node_modules/preact/compat"],

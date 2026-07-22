@@ -14,6 +14,9 @@
  */
 
 import { seedIosKit } from './ios-kit-seed';
+import { reconstructComponent } from './keyboard-reconstruct';
+import keyboardLightExport from '../assets/keyboard-light.json';
+import keyboardDarkExport from '../assets/keyboard-dark.json';
 
 const ICONS_PAGE_NAME = '_Flaude Icons';
 
@@ -115,22 +118,31 @@ export async function flaudeHomeIndicator(): Promise<InstanceNode> {
   return master.createInstance();
 }
 
-// Real, full Apple keyboard (with Suggestion bar + Emoji/Mic row) that the
-// user detached and componentized on "_Flaude iOS Kit" from their own
-// styled instances. IMPORTANT: this is NOT the same component set as
-// "_Keyboard - iPhone Layouts" (which has a genuine Mode=Light/Dark variant
-// property but is missing the Suggestion bar and Emoji/Mic row entirely) —
-// the full keyboard's underlying Apple component ('Keyboard' set, Type=
-// Web Form/Default/etc.) has NO real dark-mode property, so "dark" only
-// exists as the user's own hand-styled + detached instance. Search by name,
-// never hand-draw a keyboard with rectangles/text.
+// Real, full Apple keyboard (with Suggestion bar + Emoji/Mic row), bundled
+// with the plugin as a JSON_REST_V1 export (see keyboard-reconstruct.ts for
+// why JSON instead of SVG: SVG would flatten real text/layer-structure).
+// Works in ANY file, immediately — no manual per-file Figma setup required,
+// unlike the earlier search-only approach. Search by name first (fast path,
+// reuse if this file already seeded one); only reconstruct from the bundle
+// if missing. Never hand-draw a keyboard with rectangles/text.
 const KEYBOARD_LIGHT_NAME = 'ios-keyboard-full · Light';
 const KEYBOARD_DARK_NAME = 'ios-keyboard-full · Dark';
+const KEYBOARD_PAGE_NAME = '_Flaude iOS Kit';
 
 async function findKeyboardComponent(name: string): Promise<ComponentNode | null> {
   await figma.loadAllPagesAsync();
   const matches = figma.root.findAllWithCriteria({ types: ['COMPONENT'] });
   return (matches.find((c) => c.name === name) as ComponentNode | undefined) ?? null;
+}
+
+function getOrCreateKeyboardPage(): PageNode {
+  const existing = figma.root.children.find(
+    (p): p is PageNode => p.type === 'PAGE' && p.name === KEYBOARD_PAGE_NAME
+  );
+  if (existing) return existing;
+  const page = figma.createPage();
+  page.name = KEYBOARD_PAGE_NAME;
+  return page;
 }
 
 export interface FlaudeKeyboardOptions {
@@ -139,23 +151,22 @@ export interface FlaudeKeyboardOptions {
 }
 
 /**
- * Instance of the user's real, full Apple keyboard component (with
- * Suggestion bar + Emoji/Mic row) — never the crude bundled placeholder,
- * and never a partial keyboard missing the emoji/mic row. Throws a clear
- * error (never silently draws a fallback) if the component isn't present
- * in this file yet.
+ * Instance of the real, full Apple keyboard component (with Suggestion bar +
+ * Emoji/Mic row) — never a hand-drawn substitute, never a partial keyboard
+ * missing the emoji/mic row. Bundled with the plugin, so it works in every
+ * file: searches the current file first, and seeds a real reconstructed
+ * component (once, idempotently) from the bundled export if missing.
  */
 export async function flaudeKeyboard(opts: FlaudeKeyboardOptions = {}): Promise<InstanceNode> {
   const mode = opts.mode ?? 'Light';
   const name = mode === 'Dark' ? KEYBOARD_DARK_NAME : KEYBOARD_LIGHT_NAME;
 
-  const master = await findKeyboardComponent(name);
+  let master = await findKeyboardComponent(name);
   if (!master) {
-    throw new Error(
-      `"${name}" component not found in this file — never hand-draw a keyboard ` +
-        `with rectangles/text. Add the real Apple keyboard component (light AND ` +
-        `dark, each with the Suggestion bar + Emoji/Mic row) to "_Flaude iOS Kit" first.`
-    );
+    const exported = mode === 'Dark' ? keyboardDarkExport : keyboardLightExport;
+    const page = getOrCreateKeyboardPage();
+    master = await reconstructComponent(exported as never, page);
+    master.name = name;
   }
 
   return master.createInstance();
