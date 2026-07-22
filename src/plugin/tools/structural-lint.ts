@@ -195,6 +195,49 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           });
         }
       }
+
+      // 6. Ungrouped label sitting on a background shape: a TEXT node (or an
+      //    icon INSTANCE) whose bounding box sits almost entirely inside a
+      //    sibling RECTANGLE/FRAME/ELLIPSE "background", with neither one
+      //    actually parented into the other — they only line up because of
+      //    matching x/y math. This is why a "button" or "row" can't be
+      //    selected, moved, or transferred as ONE thing: its background and
+      //    label are independent elements, not one Figma unit. Every
+      //    background+label (or background+icon) pair that forms a single
+      //    visual unit (button, row, badge, card) must be wrapped in its own
+      //    FRAME or componentized — never left as loose positioned siblings
+      //    of a large shared container (a screen, a list).
+      if ('children' in node && node.children.length >= 3) {
+        const shapeChildren = node.children.filter(
+          (c): c is RectangleNode | FrameNode | EllipseNode =>
+            c.type === 'RECTANGLE' || c.type === 'FRAME' || c.type === 'ELLIPSE'
+        );
+        const labelChildren = node.children.filter(
+          (c): c is TextNode | InstanceNode => c.type === 'TEXT' || c.type === 'INSTANCE'
+        );
+        for (const label of labelChildren) {
+          const labelArea = label.width * label.height;
+          if (labelArea === 0) continue;
+          const labelIndex = node.children.indexOf(label);
+          for (const shape of shapeChildren) {
+            if (node.children.indexOf(shape) >= labelIndex) continue; // shape must render behind the label
+            const ix1 = Math.max(label.x, shape.x);
+            const iy1 = Math.max(label.y, shape.y);
+            const ix2 = Math.min(label.x + label.width, shape.x + shape.width);
+            const iy2 = Math.min(label.y + label.height, shape.y + shape.height);
+            const overlapArea = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+            if (overlapArea / labelArea >= 0.9) {
+              findings.push({
+                rule: 'ungrouped-label-over-shape',
+                nodeId: label.id,
+                nodeName: label.name,
+                message: `"${label.name}" sits on top of sibling "${shape.name}" but they are only independent siblings, not grouped/parented together — wrap this background+label (or +icon) pair in its own FRAME, or make it a proper COMPONENT, so it can be selected, moved, and reused as ONE unit instead of two elements that only line up via matching x/y coordinates.`,
+              });
+              break;
+            }
+          }
+        }
+      }
     }
 
     if ('children' in node) {
