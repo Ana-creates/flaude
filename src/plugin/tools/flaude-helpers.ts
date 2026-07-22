@@ -115,60 +115,50 @@ export async function flaudeHomeIndicator(): Promise<InstanceNode> {
   return master.createInstance();
 }
 
-// Real Apple keyboard component set (uploaded by the user onto "_iOS Kit"),
-// NOT the crude bundled placeholder — has genuine Mode (Light/Dark) and Type
-// (Letters - Lowercase/Uppercase, Numbers, Characters) variant properties.
-const KEYBOARD_LAYOUTS_SET_NAME = '_Keyboard - iPhone Layouts';
+// Real, full Apple keyboard (with Suggestion bar + Emoji/Mic row) that the
+// user detached and componentized on "_Flaude iOS Kit" from their own
+// styled instances. IMPORTANT: this is NOT the same component set as
+// "_Keyboard - iPhone Layouts" (which has a genuine Mode=Light/Dark variant
+// property but is missing the Suggestion bar and Emoji/Mic row entirely) —
+// the full keyboard's underlying Apple component ('Keyboard' set, Type=
+// Web Form/Default/etc.) has NO real dark-mode property, so "dark" only
+// exists as the user's own hand-styled + detached instance. Search by name,
+// never hand-draw a keyboard with rectangles/text.
+const KEYBOARD_LIGHT_NAME = 'ios-keyboard-full · Light';
+const KEYBOARD_DARK_NAME = 'ios-keyboard-full · Dark';
 
-async function findRealKeyboardComponentSet(): Promise<ComponentSetNode | null> {
+async function findKeyboardComponent(name: string): Promise<ComponentNode | null> {
   await figma.loadAllPagesAsync();
-  const matches = figma.root.findAllWithCriteria({ types: ['COMPONENT_SET'] });
-  return (
-    (matches.find((c) => c.name === KEYBOARD_LAYOUTS_SET_NAME) as ComponentSetNode | undefined) ?? null
-  );
+  const matches = figma.root.findAllWithCriteria({ types: ['COMPONENT'] });
+  return (matches.find((c) => c.name === name) as ComponentNode | undefined) ?? null;
 }
 
 export interface FlaudeKeyboardOptions {
   /** Default: 'Light'. Use 'Dark' on dark-background screens. */
   mode?: 'Light' | 'Dark';
-  /** Default: 'Letters - Lowercase'. */
-  type?: 'Letters - Lowercase' | 'Letters - Uppercase' | 'Numbers' | 'Characters';
 }
 
 /**
- * Instance of the REAL Apple keyboard component (Mode + Type variants) —
- * never the crude bundled placeholder. Matches variants by their parsed
- * variantProperties (not .name string matching, since Figma's own variant
- * names have inconsistent spacing, e.g. "Mode= Light" vs "Mode=Dark").
- * Throws a clear error (never silently draws a fallback) if "_iOS Kit" /
- * the layouts component set isn't present in this file.
+ * Instance of the user's real, full Apple keyboard component (with
+ * Suggestion bar + Emoji/Mic row) — never the crude bundled placeholder,
+ * and never a partial keyboard missing the emoji/mic row. Throws a clear
+ * error (never silently draws a fallback) if the component isn't present
+ * in this file yet.
  */
 export async function flaudeKeyboard(opts: FlaudeKeyboardOptions = {}): Promise<InstanceNode> {
   const mode = opts.mode ?? 'Light';
-  const type = opts.type ?? 'Letters - Lowercase';
+  const name = mode === 'Dark' ? KEYBOARD_DARK_NAME : KEYBOARD_LIGHT_NAME;
 
-  const componentSet = await findRealKeyboardComponentSet();
-  if (!componentSet) {
+  const master = await findKeyboardComponent(name);
+  if (!master) {
     throw new Error(
-      `"${KEYBOARD_LAYOUTS_SET_NAME}" component set not found in this file — never hand-draw ` +
-        `a keyboard with rectangles/text. Add the real Apple keyboard component to "_iOS Kit" first.`
+      `"${name}" component not found in this file — never hand-draw a keyboard ` +
+        `with rectangles/text. Add the real Apple keyboard component (light AND ` +
+        `dark, each with the Suggestion bar + Emoji/Mic row) to "_Flaude iOS Kit" first.`
     );
   }
 
-  const variant = componentSet.children.find((c): c is ComponentNode => {
-    if (c.type !== 'COMPONENT') return false;
-    const props = c.variantProperties;
-    return props?.Mode?.trim() === mode && props?.Type?.trim() === type;
-  });
-  if (!variant) {
-    const available = componentSet.children.map((c) => c.name).join(', ');
-    throw new Error(
-      `No keyboard variant matching Mode="${mode}", Type="${type}" in "${KEYBOARD_LAYOUTS_SET_NAME}". ` +
-        `Available variants: ${available}`
-    );
-  }
-
-  return variant.createInstance();
+  return master.createInstance();
 }
 
 /**
