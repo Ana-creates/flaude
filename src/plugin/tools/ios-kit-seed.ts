@@ -1,0 +1,247 @@
+/**
+ * iOS Kit Seeder
+ *
+ * Bundles a small set of universal iOS chrome components — status bar,
+ * home indicator, and a simplified keyboard — directly in the plugin source
+ * so they ship inside the build (zero network dependency), unlike the
+ * lazily-fetched 54-icon core set.
+ *
+ * Design: ONE master component per asset, created once per file on a
+ * dedicated "_Flaude iOS Kit" page. Callers should NOT re-search the file by
+ * name on every screen — `seedIosKit()` is idempotent and returns the master
+ * component node IDs directly, so callers cache those IDs (e.g. from the
+ * first call's response) and `createInstance()` straight from them.
+ */
+
+const IOS_KIT_PAGE_NAME = '_Flaude iOS Kit';
+
+const STATUS_BAR_COMPONENT_NAME = 'ios-status-bar · Default';
+const HOME_INDICATOR_COMPONENT_NAME = 'ios-home-indicator · Default';
+const KEYBOARD_COMPONENT_NAME = 'ios-keyboard · Default';
+
+// Bundled glyph SVGs (signal / wifi / battery) — inlined so
+// build-figma-plugin bundles them into the shipped plugin, no fetch needed.
+const SIGNAL_SVG = `<svg width="18" height="12" viewBox="0 0 18 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect x="0" y="8" width="3" height="4" rx="1" fill="#000000"/>
+<rect x="5" y="6" width="3" height="6" rx="1" fill="#000000"/>
+<rect x="10" y="3" width="3" height="9" rx="1" fill="#000000"/>
+<rect x="15" y="0" width="3" height="12" rx="1" fill="#000000"/>
+</svg>`;
+
+const WIFI_SVG = `<svg width="17" height="12" viewBox="0 0 17 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M8.5 11C9.32843 11 10 10.3284 10 9.5C10 8.67157 9.32843 8 8.5 8C7.67157 8 7 8.67157 7 9.5C7 10.3284 7.67157 11 8.5 11Z" fill="#000000"/>
+<path d="M4.5 7C5.9 5.6 7.1 5 8.5 5C9.9 5 11.1 5.6 12.5 7" stroke="#000000" stroke-width="1.6" stroke-linecap="round"/>
+<path d="M1.5 4C3.5 2 5.9 1 8.5 1C11.1 1 13.5 2 15.5 4" stroke="#000000" stroke-width="1.6" stroke-linecap="round"/>
+</svg>`;
+
+const BATTERY_SVG = `<svg width="25" height="12" viewBox="0 0 25 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect x="0.75" y="0.75" width="21.5" height="10.5" rx="2.5" stroke="#000000" stroke-opacity="0.35" stroke-width="1"/>
+<rect x="2" y="2" width="19" height="8" rx="1.5" fill="#000000"/>
+<path d="M23.5 4V8C24.3284 7.65 24.8 6.9 24.8 6C24.8 5.1 24.3284 4.35 23.5 4Z" fill="#000000" fill-opacity="0.4"/>
+</svg>`;
+
+interface SeedResult {
+  created: string[];
+  alreadyPresent: string[];
+  componentIds: {
+    statusBar: string;
+    homeIndicator: string;
+    keyboard: string;
+  };
+}
+
+function getOrCreateIosKitPage(): PageNode {
+  const existing = figma.root.children.find(
+    (p): p is PageNode => p.type === 'PAGE' && p.name === IOS_KIT_PAGE_NAME
+  );
+  if (existing) return existing;
+  const page = figma.createPage();
+  page.name = IOS_KIT_PAGE_NAME;
+  return page;
+}
+
+async function findExistingComponent(name: string): Promise<ComponentNode | null> {
+  // Dynamic-page documents (large files with many pages, like this one)
+  // require all pages to be loaded before a root-wide findAllWithCriteria
+  // scan is allowed — otherwise Figma throws "documentAccess: dynamic-page".
+  await figma.loadAllPagesAsync();
+  const matches = figma.root.findAllWithCriteria({ types: ['COMPONENT'] });
+  return (matches.find((c) => c.name === name) as ComponentNode | undefined) ?? null;
+}
+
+async function createStatusBarComponent(page: PageNode): Promise<ComponentNode> {
+  const component = figma.createComponent();
+  component.name = STATUS_BAR_COMPONENT_NAME;
+  component.resize(393, 44);
+  component.layoutMode = 'HORIZONTAL';
+  component.primaryAxisAlignItems = 'SPACE_BETWEEN';
+  component.counterAxisAlignItems = 'CENTER';
+  component.paddingLeft = 20;
+  component.paddingRight = 16;
+  component.paddingTop = 14;
+  component.paddingBottom = 12;
+  component.fills = [];
+  component.clipsContent = false;
+
+  const time = figma.createText();
+  const fonts = ['SF Pro', 'Inter', 'Roboto'];
+  let fontLoaded = false;
+  for (const family of fonts) {
+    try {
+      await figma.loadFontAsync({ family, style: 'Semibold' });
+      time.fontName = { family, style: 'Semibold' };
+      fontLoaded = true;
+      break;
+    } catch {
+      // try next
+    }
+  }
+  if (!fontLoaded) {
+    await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+    time.fontName = { family: 'Inter', style: 'Regular' };
+  }
+  time.characters = '9:41';
+  time.fontSize = 15;
+  time.name = 'Time';
+  component.appendChild(time);
+
+  const glyphs = figma.createFrame();
+  glyphs.name = 'Glyphs';
+  glyphs.layoutMode = 'HORIZONTAL';
+  glyphs.itemSpacing = 5;
+  glyphs.counterAxisAlignItems = 'CENTER';
+  glyphs.fills = [];
+  component.appendChild(glyphs);
+
+  for (const [name, svg] of [
+    ['Signal', SIGNAL_SVG],
+    ['Wifi', WIFI_SVG],
+    ['Battery', BATTERY_SVG],
+  ] as const) {
+    const node = figma.createNodeFromSvg(svg);
+    node.name = name;
+    glyphs.appendChild(node);
+  }
+
+  page.appendChild(component);
+  return component;
+}
+
+function createHomeIndicatorComponent(page: PageNode): ComponentNode {
+  const component = figma.createComponent();
+  component.name = HOME_INDICATOR_COMPONENT_NAME;
+  component.resize(393, 34);
+  component.fills = [];
+  component.clipsContent = false;
+
+  const pill = figma.createRectangle();
+  pill.name = 'Pill';
+  pill.resize(134, 5);
+  pill.x = (393 - 134) / 2;
+  pill.y = (34 - 5) / 2 - 4;
+  pill.cornerRadius = 100;
+  pill.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, opacity: 1 }];
+  component.appendChild(pill);
+
+  page.appendChild(component);
+  return component;
+}
+
+async function createKeyboardComponent(page: PageNode): Promise<ComponentNode> {
+  const rows = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
+  const keyWidth = 33;
+  const keyHeight = 42;
+  const keyGap = 6;
+  const rowGap = 10;
+  const width = 393;
+  const height = 24 + rows.length * keyHeight + (rows.length - 1) * rowGap + 40;
+
+  await figma.loadFontAsync({ family: 'Inter', style: 'Regular' }).catch(() => {});
+
+  const component = figma.createComponent();
+  component.name = KEYBOARD_COMPONENT_NAME;
+  component.resize(width, height);
+  component.fills = [{ type: 'SOLID', color: { r: 0.82, g: 0.83, b: 0.85 } }];
+
+  let y = 12;
+  for (const [rowIndex, row] of rows.entries()) {
+    const rowWidth = row.length * keyWidth + (row.length - 1) * keyGap;
+    const startX = (width - rowWidth) / 2 + (rowIndex === rows.length - 1 ? keyWidth * 0.6 : 0);
+    for (let i = 0; i < row.length; i++) {
+      const key = figma.createFrame();
+      key.name = `Key / ${row[i]}`;
+      key.resize(keyWidth, keyHeight);
+      key.x = startX + i * (keyWidth + keyGap);
+      key.y = y;
+      key.cornerRadius = 5;
+      key.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+      key.layoutMode = 'NONE';
+      component.appendChild(key);
+
+      const label = figma.createText();
+      label.characters = row[i];
+      label.fontSize = 20;
+      label.fontName = { family: 'Inter', style: 'Regular' };
+      label.textAlignHorizontal = 'CENTER';
+      label.textAlignVertical = 'CENTER';
+      label.resize(keyWidth, keyHeight);
+      label.x = key.x;
+      label.y = key.y;
+      component.appendChild(label);
+    }
+    y += keyHeight + rowGap;
+  }
+
+  page.appendChild(component);
+  return component;
+}
+
+/**
+ * Idempotently seeds the iOS-kit master components (status bar, home
+ * indicator, keyboard) on the "_Flaude iOS Kit" page. Safe to call every
+ * time a screen needs one of these — components already present are
+ * returned as-is (`alreadyPresent`), never duplicated.
+ *
+ * Callers should createInstance() directly from the returned componentIds
+ * rather than re-searching the file by name on every screen.
+ */
+export async function seedIosKit(): Promise<SeedResult> {
+  const page = getOrCreateIosKitPage();
+
+  const created: string[] = [];
+  const alreadyPresent: string[] = [];
+
+  let statusBar = await findExistingComponent(STATUS_BAR_COMPONENT_NAME);
+  if (statusBar) {
+    alreadyPresent.push(STATUS_BAR_COMPONENT_NAME);
+  } else {
+    statusBar = await createStatusBarComponent(page);
+    created.push(STATUS_BAR_COMPONENT_NAME);
+  }
+
+  let homeIndicator = await findExistingComponent(HOME_INDICATOR_COMPONENT_NAME);
+  if (homeIndicator) {
+    alreadyPresent.push(HOME_INDICATOR_COMPONENT_NAME);
+  } else {
+    homeIndicator = createHomeIndicatorComponent(page);
+    created.push(HOME_INDICATOR_COMPONENT_NAME);
+  }
+
+  let keyboard = await findExistingComponent(KEYBOARD_COMPONENT_NAME);
+  if (keyboard) {
+    alreadyPresent.push(KEYBOARD_COMPONENT_NAME);
+  } else {
+    keyboard = await createKeyboardComponent(page);
+    created.push(KEYBOARD_COMPONENT_NAME);
+  }
+
+  return {
+    created,
+    alreadyPresent,
+    componentIds: {
+      statusBar: statusBar.id,
+      homeIndicator: homeIndicator.id,
+      keyboard: keyboard.id,
+    },
+  };
+}

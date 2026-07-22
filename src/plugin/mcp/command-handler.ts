@@ -33,9 +33,14 @@ import {
   validateAgainstSchema,
   anchorBelow,
   centerInParent,
+  centerOnSibling,
   makeHugPillButton,
   verifyLayout,
 } from '../tools/edit-tools';
+import { seedIosKit } from '../tools/ios-kit-seed';
+import { runStructuralLint } from '../tools/structural-lint';
+import { flaudeHelpers } from '../tools/flaude-helpers';
+import { recordScreenshot, checkReferenceCaptured } from '../tools/reference-tracking';
 
 type CommandHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -206,6 +211,11 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     axis: params.axis as 'horizontal' | 'vertical' | 'both' | undefined,
     containerId: params.containerId as string | undefined,
   }),
+  center_on_sibling: (params) => centerOnSibling({
+    nodeId: params.nodeId as string,
+    siblingId: params.siblingId as string,
+    axis: params.axis as 'horizontal' | 'vertical' | 'both' | undefined,
+  }),
   make_hug_pill_button: (params) => makeHugPillButton({
     nodeId: params.nodeId as string,
     paddingX: params.paddingX as number | undefined,
@@ -222,8 +232,10 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   }),
 
   // UTILITY COMMANDS
-  zoom_to_node: (params) => {
-    const node = figma.getNodeById(params.nodeId as string);
+  zoom_to_node: async (params) => {
+    // getNodeByIdAsync (not the sync getNodeById) is required for nodes on
+    // pages that aren't currently loaded in dynamic-page documents.
+    const node = await figma.getNodeByIdAsync(params.nodeId as string);
     if (node && 'x' in node) {
       figma.viewport.scrollAndZoomIntoView([node as SceneNode]);
       return { success: true, nodeId: params.nodeId };
@@ -231,12 +243,12 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     throw new Error(`Node not found: ${params.nodeId}`);
   },
 
-  select_nodes: (params) => {
+  select_nodes: async (params) => {
     const nodeIds = params.nodeIds as string[];
     const nodes: SceneNode[] = [];
 
     for (const id of nodeIds) {
-      const node = figma.getNodeById(id);
+      const node = await figma.getNodeByIdAsync(id);
       if (node && 'x' in node) {
         nodes.push(node as SceneNode);
       }
@@ -252,10 +264,12 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     childCount: figma.currentPage.children.length,
   }),
 
-  set_current_page: (params) => {
+  set_current_page: async (params) => {
     const page = figma.root.children.find(p => p.id === params.pageId || p.name === params.pageName);
     if (page) {
-      figma.currentPage = page;
+      // setCurrentPageAsync (not the sync figma.currentPage assignment) is
+      // required in dynamic-page documents.
+      await figma.setCurrentPageAsync(page);
       return { success: true, pageId: page.id, pageName: page.name };
     }
     throw new Error(`Page not found: ${params.pageId || params.pageName}`);
@@ -270,20 +284,63 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
 
   // figma_execute: run arbitrary JS in the Figma plugin context with `figma` global.
   // Code is wrapped in an async IIFE so callers can use `await` and `return`.
+  //
+  // After the agent's code runs, we ALWAYS run a structural lint pass over
+  // whatever page ended up current and attach findings as `_lint` on the
+  // result — unconditionally, not something the agent has to remember to
+  // ask for. This is the mechanical backstop for defects that prose rules
+  // (ICON BOOTSTRAP, REFERENCE-MATCH MODE) documented but didn't prevent:
+  // hand-drawn icons/iOS chrome, buttons that silently collapse because a
+  // resize() call didn't match the auto-layout sizing mode, avatar
+  // placeholders where the reference shows a real photo, and two buttons
+  // accidentally wrapped into what reads as one toggle track.
   execute: async (params) => {
     const code = params.code as string;
     if (typeof code !== 'string' || !code.trim()) {
       throw new Error('execute requires a non-empty `code` string');
     }
+    // Snapshot BEFORE running the code so the reference-capture check below
+    // can tell which top-level nodes are newly created by THIS call.
+    const beforePage = figma.currentPage;
+    const beforeIds = new Set(beforePage.children.map((n) => n.id));
+
+    let result: unknown;
     try {
+      // `figma` is frozen/sealed by Figma's plugin sandbox — assigning
+      // figma.flaude = ... throws "object is not extensible". Expose the
+      // blessed helpers (icon/statusBar/homeIndicator/keyboard) as their own
+      // top-level `flaude` parameter instead, so agent code calls
+      // `flaude.icon(...)` rather than `figma.flaude.icon(...)`.
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
-      const fn = new Function('figma', `return (async () => { ${code} })()`);
-      const result = await fn(figma);
-      // Return JSON-serializable data only
-      return result === undefined ? null : result;
+      const fn = new Function('figma', 'flaude', `return (async () => { ${code} })()`);
+      result = await fn(figma, flaudeHelpers);
     } catch (err) {
       throw new Error(`execute failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    // Only merge lint findings into plain-object results (e.g. `return { id }`)
+    // so array/string/number returns from read-only inspection calls keep their
+    // exact original shape — `_lint` is purely additive, never a restructuring.
+    const isPlainObject =
+      result !== null && typeof result === 'object' && !Array.isArray(result);
+
+    if (isPlainObject) {
+      try {
+        const page = figma.currentPage;
+        const pageHasRefFrames = page.children.some((n) => n.name.startsWith('REF /'));
+        const lint: unknown[] = runStructuralLint(page, pageHasRefFrames);
+        if (page.id === beforePage.id) {
+          lint.push(...checkReferenceCaptured(page, beforeIds));
+        }
+        if (lint.length > 0) {
+          return { ...(result as Record<string, unknown>), _lint: lint };
+        }
+      } catch {
+        // Lint is advisory only — never let a lint failure mask the real result.
+      }
+    }
+
+    return result === undefined ? null : result;
   },
 
   // figma_screenshot: export a node (or current selection) as a base64 PNG.
@@ -291,7 +348,9 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     const scale = (params.scale as number) || 1;
     let node: SceneNode | null = null;
     if (params.nodeId) {
-      const found = figma.getNodeById(params.nodeId as string);
+      // getNodeByIdAsync (not the sync getNodeById) is required for nodes on
+      // pages that aren't currently loaded in dynamic-page documents.
+      const found = await figma.getNodeByIdAsync(params.nodeId as string);
       if (found && 'exportAsync' in found) node = found as SceneNode;
     } else {
       const sel = figma.currentPage.selection[0];
@@ -300,6 +359,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     if (!node) {
       throw new Error('No node to screenshot: pass nodeId or select a node in Figma');
     }
+    recordScreenshot(node);
     const bytes = await node.exportAsync({
       format: 'PNG',
       constraint: { type: 'SCALE', value: scale },
@@ -338,8 +398,13 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     };
   },
 
+  // seed_ios_kit: idempotently create the bundled iOS status bar / home
+  // indicator / keyboard master components on "_Flaude iOS Kit", returning
+  // their component IDs so callers instance directly instead of re-searching.
+  seed_ios_kit: async () => seedIosKit(),
+
   // figma_navigate: scroll/zoom viewport to a node, and/or switch page.
-  navigate: (params) => {
+  navigate: async (params) => {
     const { nodeId, pageId, pageName } = params as {
       nodeId?: string;
       pageId?: string;
@@ -351,11 +416,15 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         (p) => p.id === pageId || p.name === pageName
       );
       if (!page) throw new Error(`Page not found: ${pageId || pageName}`);
-      figma.currentPage = page;
+      // setCurrentPageAsync (not the sync figma.currentPage assignment) is
+      // required in dynamic-page documents.
+      await figma.setCurrentPageAsync(page);
     }
 
     if (nodeId) {
-      const node = figma.getNodeById(nodeId);
+      // getNodeByIdAsync (not the sync getNodeById) is required for nodes on
+      // pages that aren't currently loaded in dynamic-page documents.
+      const node = await figma.getNodeByIdAsync(nodeId);
       if (!node) throw new Error(`Node not found: ${nodeId}`);
       if ('x' in node) {
         figma.viewport.scrollAndZoomIntoView([node as SceneNode]);

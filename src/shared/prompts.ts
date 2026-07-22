@@ -165,27 +165,39 @@ these are hard rules — violating any is a defect, not a style choice:
    the tile's image fill. A tile rendered as a flat colored circle/rectangle with
    no image is a defect. Verify every image tile actually has an image fill before
    declaring done.
-9. **Reuse the icon library — never hand-draw an icon that already exists.** The
-   file ships a large local icon library on the 'Icons' page (the Solar icon set
-   plus a small starter set). Components are named either 'Outline / <Category> /
-   <Name>' (Solar, e.g. 'Outline / Call / Phone', 'Outline / Essentional, UI /
-   Check Circle') or 'icon / <name> / <style>' (starter, e.g. 'icon / home /
-   linear'). BEFORE drawing any icon as vectors, search local components and
-   place an INSTANCE of the best name match:
-     const icons = figma.root.findAllWithCriteria({ types: ['COMPONENT'] })
-       .filter(c => /(^|\/ )icon /i.test(c.name) || /^outline \//i.test(c.name));
-     // fuzzy-match the icon you need against the last name segment
-     // (e.g. need a phone icon -> 'Outline / Call / Phone'), then:
-     // const inst = match.createInstance();
-   These icons are single-vector with a solid fill, so recolor by overriding the
-   instance fill to match the reference. Only fall back to figma.createVector()
-   if NO matching icon component exists. Hand-drawing an icon that's already in
-   the library (wrong stroke weight, off proportions, slow) is a defect.
+9. **Seed once, instance forever — never hand-draw an icon or iOS-chrome piece
+   that already exists.** New files start empty: there is no pre-shipped icon
+   library, so self-seed instead of assuming one.
+   a. **iOS chrome (status bar, home indicator, keyboard):** call the
+      seed_ios_kit MCP command ONCE per file. It idempotently creates these
+      as master components on a "_Flaude iOS Kit" page (bundled with the
+      plugin, no network) and returns their component IDs directly — cache
+      those IDs and createInstance() from them on every screen. Do NOT
+      re-search the file by name for these; seed_ios_kit is the single
+      source of truth and no-ops safely if already seeded.
+   b. **Every other icon concept (the 54-icon core set):** BEFORE drawing any
+      icon as vectors, search the WHOLE file for an existing match:
+        const icons = figma.root.findAllWithCriteria({ types: ['COMPONENT'] })
+          .filter(c => /^[a-z-]+ · /i.test(c.name) || /^outline \//i.test(c.name));
+        // fuzzy-match by concept (e.g. need a phone icon -> 'phone · Outline / Call / Phone')
+        // const inst = match.createInstance();
+      If nothing matches, call get_core_icons (optionally passing a concepts
+      array) to fetch SVG source, then for each: figma.createNodeFromSvg(svg)
+      to wrap into figma.createComponent(), name it "<concept> · <name>"
+      (e.g. "upload · Outline / Arrows Action / Upload"), then place on a
+      dedicated "_Flaude Icons" page (create if missing). From then on, use
+      createInstance() — never re-draw; later screens find it via the search
+      above and skip re-fetching. These icons are single-vector with a solid
+      fill, so recolor by overriding the instance fill to match the reference.
+      Only fall back to figma.createVector() if the concept isn't in the
+      54-icon core set AND nothing similar already exists locally.
+   Hand-drawing an icon or iOS-chrome piece that's already seeded (wrong stroke
+   weight, off proportions, slow, inconsistent across screens) is a defect.
    If the file's icons live in a shared/TEAM library rather than locally, do NOT call
    figma.teamLibrary.* or report a "team libraries / manifest permission" error to the
    user (that API exposes variables only and is not permitted). Instead clone from an
    existing instance's master (const m = await inst.getMainComponentAsync(); m.createInstance()),
-   or source a matching SVG icon by URL. Hand-draw only as a last resort.
+   or seed from the core set as described above. Hand-draw only as a last resort.
 RECURRING-DEFECTS GATE — before declaring ANY screen done, resolve each and report PASS/FAIL:
   A) Icons/nav: every nav + tab-bar glyph is a library INSTANCE (never hand-drawn); build the
      bottom nav/tab bar as ONE component and MATCH THE REFERENCE'S SHAPE (flat / floating pill /
