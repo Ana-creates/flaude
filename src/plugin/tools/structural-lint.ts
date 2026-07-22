@@ -207,7 +207,12 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       //    visual unit (button, row, badge, card) must be wrapped in its own
       //    FRAME or componentized — never left as loose positioned siblings
       //    of a large shared container (a screen, a list).
-      if ('children' in node && node.children.length >= 3) {
+      //    Screen-root-sized containers are exempt: a whole screen legitimately
+      //    contains many background+label pairs by ordinary page composition
+      //    (e.g. a full-bleed header behind a title) — that's not the "can't
+      //    select this button as one thing" defect this rule targets.
+      const isScreenRootSized = w >= 350 && h >= 700;
+      if ('children' in node && node.children.length >= 3 && !isScreenRootSized) {
         const shapeChildren = node.children.filter(
           (c): c is RectangleNode | FrameNode | EllipseNode =>
             c.type === 'RECTANGLE' || c.type === 'FRAME' || c.type === 'ELLIPSE'

@@ -115,11 +115,60 @@ export async function flaudeHomeIndicator(): Promise<InstanceNode> {
   return master.createInstance();
 }
 
-/** Idempotent keyboard instance \u2014 never hand-draw keyboard keys with rectangles. */
-export async function flaudeKeyboard(): Promise<InstanceNode> {
-  const { componentIds } = await seedIosKit();
-  const master = await seededComponent(componentIds.keyboard, 'Keyboard');
-  return master.createInstance();
+// Real Apple keyboard component set (uploaded by the user onto "_iOS Kit"),
+// NOT the crude bundled placeholder — has genuine Mode (Light/Dark) and Type
+// (Letters - Lowercase/Uppercase, Numbers, Characters) variant properties.
+const KEYBOARD_LAYOUTS_SET_NAME = '_Keyboard - iPhone Layouts';
+
+async function findRealKeyboardComponentSet(): Promise<ComponentSetNode | null> {
+  await figma.loadAllPagesAsync();
+  const matches = figma.root.findAllWithCriteria({ types: ['COMPONENT_SET'] });
+  return (
+    (matches.find((c) => c.name === KEYBOARD_LAYOUTS_SET_NAME) as ComponentSetNode | undefined) ?? null
+  );
+}
+
+export interface FlaudeKeyboardOptions {
+  /** Default: 'Light'. Use 'Dark' on dark-background screens. */
+  mode?: 'Light' | 'Dark';
+  /** Default: 'Letters - Lowercase'. */
+  type?: 'Letters - Lowercase' | 'Letters - Uppercase' | 'Numbers' | 'Characters';
+}
+
+/**
+ * Instance of the REAL Apple keyboard component (Mode + Type variants) —
+ * never the crude bundled placeholder. Matches variants by their parsed
+ * variantProperties (not .name string matching, since Figma's own variant
+ * names have inconsistent spacing, e.g. "Mode= Light" vs "Mode=Dark").
+ * Throws a clear error (never silently draws a fallback) if "_iOS Kit" /
+ * the layouts component set isn't present in this file.
+ */
+export async function flaudeKeyboard(opts: FlaudeKeyboardOptions = {}): Promise<InstanceNode> {
+  const mode = opts.mode ?? 'Light';
+  const type = opts.type ?? 'Letters - Lowercase';
+
+  const componentSet = await findRealKeyboardComponentSet();
+  if (!componentSet) {
+    throw new Error(
+      `"${KEYBOARD_LAYOUTS_SET_NAME}" component set not found in this file — never hand-draw ` +
+        `a keyboard with rectangles/text. Add the real Apple keyboard component to "_iOS Kit" first.`
+    );
+  }
+
+  const variant = componentSet.children.find((c): c is ComponentNode => {
+    if (c.type !== 'COMPONENT') return false;
+    const props = c.variantProperties;
+    return props?.Mode?.trim() === mode && props?.Type?.trim() === type;
+  });
+  if (!variant) {
+    const available = componentSet.children.map((c) => c.name).join(', ');
+    throw new Error(
+      `No keyboard variant matching Mode="${mode}", Type="${type}" in "${KEYBOARD_LAYOUTS_SET_NAME}". ` +
+        `Available variants: ${available}`
+    );
+  }
+
+  return variant.createInstance();
 }
 
 /**
