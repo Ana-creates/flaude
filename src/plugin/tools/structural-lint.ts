@@ -108,8 +108,25 @@ function backgroundColorBehind(text: SceneNode): RGB | null {
         const iy2 = Math.min(text.y + text.height, s.y + s.height);
         const overlap = Math.max(0, ix2 - ix) * Math.max(0, iy2 - iy);
         if (overlap / tArea >= 0.9) {
-          const c = firstSolidFill(s);
-          if (c) return c;
+          // This is the nearest shape visually behind the text; it occludes
+          // anything further back, so we decide here and STOP.
+          if (!('fills' in s)) return null;
+          const sf = s.fills;
+          if (sf === figma.mixed || !Array.isArray(sf)) return null;
+          const visible = sf.filter(
+            (f) => f.visible !== false && (f.opacity === undefined || f.opacity > 0.1)
+          );
+          // Fully transparent shape doesn't actually occlude — keep looking behind it.
+          if (visible.length === 0) continue;
+          // A visible but non-solid background (gradient / image) can't be
+          // reduced to one flat color, so a WCAG ratio is meaningless against
+          // it — return null to SKIP the contrast check rather than falling
+          // through to a distant ancestor and comparing the text against the
+          // wrong color. That fall-through was a real bug: a white label on a
+          // blue/purple GRADIENT button reported 1.00:1 "invisible" (white vs.
+          // the white screen ancestor) and would have nagged on every
+          // gradient button.
+          return firstSolidFill(s);
         }
       }
     }
