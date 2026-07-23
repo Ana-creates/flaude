@@ -46,7 +46,7 @@ import {
   checkPixelDiffMissing,
   recordComparisonMarker,
 } from '../tools/reference-tracking';
-import { recordFindings, summarizeLedger } from '../tools/error-ledger';
+import { recordFindings, summarizeLedger, recordDefect, proposePrevention } from '../tools/error-ledger';
 
 type CommandHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -509,6 +509,32 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // new deterministic checks; also directly useful to a human auditing where
   // the agent keeps slipping.
   defect_report: async () => summarizeLedger(),
+
+  // record_defect: the flywheel's INTAKE. Lets a human or a vision reviewer
+  // log a NOVEL defect (one no deterministic rule caught) into the same
+  // durable ledger, so recurring ones accumulate evidence toward a new rule.
+  record_defect: async (params) => {
+    const ruleClass = params.ruleClass as string | undefined;
+    if (!ruleClass) throw new Error('record_defect requires a `ruleClass` (short defect-class slug)');
+    return recordDefect({
+      ruleClass,
+      message: (params.message as string) ?? '',
+      nodeId: params.nodeId as string | undefined,
+      nodeName: params.nodeName as string | undefined,
+      page: params.page as string | undefined,
+      source: params.source === 'vision' ? 'vision' : 'manual',
+    });
+  },
+
+  // propose_prevention: the flywheel's ANALYZER. Reads the ledger and returns
+  // ranked, structured proposals for recurring defect classes that have NO
+  // mechanical rule yet — each a candidate new lint rule. Proposes only;
+  // installing a rule stays human-gated.
+  propose_prevention: async (params) => {
+    const minObservations = typeof params.minObservations === 'number' ? params.minObservations : 3;
+    const minSessions = typeof params.minSessions === 'number' ? params.minSessions : 1;
+    return proposePrevention(minObservations, minSessions);
+  },
 };
 
 /**
