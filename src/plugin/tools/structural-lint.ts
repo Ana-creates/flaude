@@ -184,13 +184,22 @@ function isShortInitials(t: BaseNode): boolean {
  * sits BELOW it (and is usually >3 chars), so it is still correctly flagged.
  */
 function hasCenteredInitials(node: SceneNode): boolean {
+  // Tolerance = how far the initials' center may sit from the avatar's center
+  // and still count as "centered". 35% of the avatar's half-extent — wide
+  // enough for real optical-centering nudges, tight enough to REJECT a short
+  // label/badge parked at the avatar's edge or corner (which must NOT suppress
+  // the placeholder warning). Earlier this used the full half-extent, i.e.
+  // "anywhere inside the avatar", which was too permissive.
+  const tolX = node.width * 0.35;
+  const tolY = node.height * 0.35;
+
   // avatar-as-frame: initials are a child, compared in the avatar's LOCAL coords
   if ('children' in node) {
     for (const c of node.children) {
       if (!isShortInitials(c)) continue;
       const ccx = c.x + c.width / 2;
       const ccy = c.y + c.height / 2;
-      if (Math.abs(ccx - node.width / 2) <= node.width / 2 && Math.abs(ccy - node.height / 2) <= node.height / 2) {
+      if (Math.abs(ccx - node.width / 2) <= tolX && Math.abs(ccy - node.height / 2) <= tolY) {
         return true;
       }
     }
@@ -204,7 +213,7 @@ function hasCenteredInitials(node: SceneNode): boolean {
       if (s === node || !isShortInitials(s)) continue;
       const scx = s.x + s.width / 2;
       const scy = s.y + s.height / 2;
-      if (Math.abs(scx - cx) <= node.width / 2 && Math.abs(scy - cy) <= node.height / 2) {
+      if (Math.abs(scx - cx) <= tolX && Math.abs(scy - cy) <= tolY) {
         return true;
       }
     }
