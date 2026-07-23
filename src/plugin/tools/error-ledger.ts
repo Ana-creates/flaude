@@ -171,13 +171,3 @@ export async function summarizeLedger(): Promise<LedgerSummary> {
   };
 }
 
-export async function readLedger(): Promise<LedgerEntry[]> {
-  return loadRaw();
-}
-
-/** Wipe the ledger (maintenance / test isolation). Returns entries removed. */
-export async function clearLedger(): Promise<number> {
-  const n = (await loadRaw()).length;
-  await figma.clientStorage.setAsync(LEDGER_KEY, []);
-  return n;
-}
