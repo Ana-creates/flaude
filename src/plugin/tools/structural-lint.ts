@@ -507,11 +507,51 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           // padding differing by >6px) so a genuinely-centered label whose
           // text box is a hair off doesn't nag.
           if (centerOffset > 4 && Math.abs(dyTop - dyBottom) > 6) {
+            // If the button ALSO has non-text children (e.g. a leading icon),
+            // only advise the vertical fix — telling it to fill full width +
+            // horizontally center would shove the label under the icon.
+            const hasOtherChildren = node.children.length > 1;
+            const fix = hasOtherChildren
+              ? `set the label's textAlignVertical = CENTER and match its height to the button's height so it's vertically centered, instead of hand-typing its y`
+              : `make the label FILL the button (resize to the button's width×height at x:0,y:0) with textAlignHorizontal & textAlignVertical = CENTER, so padding is equal by construction — don't hand-type the label's y`;
             findings.push({
               rule: 'label-not-centered-in-button',
               nodeId: label.id,
               nodeName: node.name,
-              message: `Label "${label.characters}" in button "${node.name}" is off-center: ${Math.round(dyTop)}px padding above vs ${Math.round(dyBottom)}px below. Make the label FILL the button (resize to the button's width×height at x:0,y:0) with textAlignHorizontal & textAlignVertical = CENTER, so padding is equal by construction — don't hand-type the label's y.`,
+              message: `Label "${label.characters}" in button "${node.name}" is off-center: ${Math.round(dyTop)}px padding above vs ${Math.round(dyBottom)}px below. ${fix}.`,
+            });
+          }
+        }
+      }
+
+      // 10. Cropped keyboard/keypad: a bottom-anchored, full-width,
+      //     keyboard-height IMAGE fill — i.e. a SCREENSHOT of the keyboard/
+      //     numeric keypad pasted in, instead of using flaude.keyboard()
+      //     (bundled QWERTY) or reconstructing a numeric keypad as real
+      //     nodes (proven doable). The real keyboard helper returns a
+      //     COMPONENT INSTANCE with children, never a flat image, so this
+      //     only ever fires on an actual crop — not on the real keyboard.
+      //     Cropping standard iOS chrome we can build is never allowed.
+      if (
+        node.type !== 'INSTANCE' &&
+        'fills' in node && Array.isArray(node.fills) &&
+        node.fills.some((f) => f.type === 'IMAGE' && f.visible !== false)
+      ) {
+        const parent = node.parent;
+        const keyboardShaped = w >= 320 && h >= 200 && h <= 400;
+        if (
+          keyboardShaped && parent && 'width' in parent && 'height' in parent &&
+          (parent as SceneNode).height >= 700
+        ) {
+          const pw = (parent as SceneNode).width;
+          const ph = (parent as SceneNode).height;
+          const bottomGap = ph - (node.y + h);
+          if (bottomGap >= -8 && bottomGap <= 48 && w >= pw * 0.85) {
+            findings.push({
+              rule: 'cropped-keyboard',
+              nodeId: sceneNode.id,
+              nodeName: sceneNode.name,
+              message: `"${sceneNode.name}" is a bottom-anchored ${Math.round(w)}×${Math.round(h)} IMAGE fill — a screenshot of a keyboard/keypad. NEVER crop the keyboard: call \`await flaude.keyboard({ mode: "Light" | "Dark" })\` for the bundled QWERTY keyboard, or reconstruct a numeric keypad as real nodes (each key a frame + centered text). Cropping standard iOS chrome you can build is not allowed.`,
             });
           }
         }
