@@ -54,10 +54,48 @@ import {
   recordReviewerMiss,
   getReviewerSharpening,
 } from '../tools/error-ledger';
+import { applyBuildBatch, setReferenceProvider } from './dsl-apply';
+import type { BuildBatch } from './dsl-compiler-plan';
+
+// Wire the DSL applier's crop-from-reference provider once, at module load.
+// A schema image with source {from:"ref", crop:[...]} resolves its bytes here:
+// find the node named by `ref` (a node id, or a "REF / ..." frame), and return
+// the raw bytes of its first IMAGE fill. `ref` undefined can't be resolved
+// without screen context in v1, so it throws loudly (never a silent grey rect).
+setReferenceProvider(async (ref?: string): Promise<Uint8Array> => {
+  if (!ref) {
+    throw new Error(
+      'image source {from:"ref"} needs an explicit `ref` in v1 (a node id or "REF / <Screen>" frame name) — the screen-tracked default reference is not yet wired'
+    );
+  }
+  await figma.loadAllPagesAsync();
+  let node =
+    (await figma.getNodeByIdAsync(ref).catch(() => null)) ??
+    figma.currentPage.findOne((n) => n.name === ref) ??
+    figma.root.findOne((n) => n.name === ref);
+  if (!node || !('fills' in node)) {
+    throw new Error(`reference "${ref}" not found or has no fills`);
+  }
+  const fills = (node as GeometryMixin).fills;
+  const img = Array.isArray(fills)
+    ? fills.find((f): f is ImagePaint => f.type === 'IMAGE' && !!f.imageHash)
+    : undefined;
+  if (!img || !img.imageHash) {
+    throw new Error(`reference "${ref}" has no image fill to crop from`);
+  }
+  const image = figma.getImageByHash(img.imageHash);
+  if (!image) throw new Error(`image hash for "${ref}" not resolvable`);
+  return image.getBytesAsync();
+});
 
 type CommandHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
+  // SCHEMA-FIRST BUILD (DSL). Deliberately NOT wrapped by the execute-path
+  // auto-lint: validation already happened server-side, and per-batch lint
+  // noise defeats the purpose. Each batch is idempotent + acked.
+  build_batch: (params) => applyBuildBatch(params as unknown as BuildBatch),
+
   // READ COMMANDS
   get_file_structure: () => getFileStructure(),
   get_selection: () => getSelection(),
