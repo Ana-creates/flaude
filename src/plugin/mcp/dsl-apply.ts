@@ -186,17 +186,26 @@ async function applyScreenOp(op: Extract<Op, { op: "screen" }>): Promise<ApplyCt
   }
   frame.resize(dev.w, dev.h);
   frame.clipsContent = true;
+  // The root DSL node IS this screen frame, and its upsert (which runs AFTER
+  // this) turns it into an auto-layout frame. Chrome must be ABSOLUTE so the
+  // root's vertical flow doesn't push it around — but `layoutPositioning =
+  // ABSOLUTE` is only valid on a child of an auto-layout parent. So establish
+  // auto-layout on the frame NOW; the root upsert re-confirms direction/props.
+  if (frame.layoutMode === "NONE") frame.layoutMode = "VERTICAL";
 
   // Chrome injection (ADAPT wired): route to the self-seeding flaude helpers.
   // Each chrome node carries a stable PD_ID so re-running is idempotent and the
   // reviewer can reference it. Chrome is absolutely positioned so the root
   // auto-layout stack (which fills the frame) doesn't push it into the flow.
+  // ensureChrome only CREATES + tags the chrome node (idempotent). Positioning
+  // is owned solely by positionChrome(), which runs as the final build step
+  // after all children are placed — so reflow can't knock chrome out of place
+  // and the placement math lives in exactly ONE spot.
   const chrome = (op as any).chrome ?? {};
   const ensureChrome = async (
     dslId: string,
     want: boolean,
-    make: () => Promise<SceneNode>,
-    place: (n: SceneNode) => void
+    make: () => Promise<SceneNode>
   ) => {
     const existing = frame!.findOne((n) => n.getPluginData(PD_ID) === dslId);
     if (!want) { existing?.remove(); return; }
@@ -205,12 +214,10 @@ async function applyScreenOp(op: Extract<Op, { op: "screen" }>): Promise<ApplyCt
     node.setPluginData(PD_ID, dslId);
     frame!.appendChild(node);
     if ("layoutPositioning" in node) (node as SceneNode & LayoutMixin).layoutPositioning = "ABSOLUTE";
-    place(node);
   };
-  await ensureChrome("chrome-status-bar", !!chrome.statusBar, () => flaudeStatusBar(), (n) => { n.x = 0; n.y = 0; });
-  await ensureChrome("chrome-home-indicator", !!chrome.homeIndicator, () => flaudeHomeIndicator(), (n) => {
-    n.x = (frame!.width - n.width) / 2; n.y = frame!.height - n.height - 8;
-  });
+  await ensureChrome("chrome-status-bar", !!chrome.statusBar, () => flaudeStatusBar());
+  await ensureChrome("chrome-home-indicator", !!chrome.homeIndicator, () => flaudeHomeIndicator());
+  positionChrome(frame);
 
   return { screen: frame, theme: (op.theme as Theme) ?? "dark" };
 }
@@ -256,7 +263,13 @@ async function upsertNode(
   const { screen, theme } = ctx;
   const p = op.props as any;
   let node = op.parentId === null ? screen : findByDslId(screen, op.id);
+  // Atomicity guard: figma.create*() immediately places the node on the page.
+  // If any later step (parenting, props, overlay math) throws, an un-parented
+  // node would leak as a loose 100x100 orphan. Track whether WE created it so
+  // the catch below can remove it. The screen root is never "created" here.
+  const preExisted = !!node;
 
+  try {
   /* ---------- create if missing ---------- */
   if (!node) {
     switch (op.nodeType) {
@@ -304,10 +317,15 @@ async function upsertNode(
       default:
         throw new Error(`unknown nodeType "${op.nodeType}"`);
     }
-    node.setPluginData(PD_ID, op.id);
     if (!node.name || node.type === "FRAME" || node.type === "TEXT")
       node.name = op.id;
   }
+
+  // Tag the node with its DSL id ALWAYS — not only on create. The root node
+  // is the pre-existing screen frame (never goes through create-if-missing),
+  // so without this it would never carry PD_ID="root" and its children could
+  // not resolve it as their parent via findByDslId.
+  node.setPluginData(PD_ID, op.id);
 
   /* ---------- parent + order ---------- */
   if (op.parentId !== null) {
@@ -427,11 +445,41 @@ async function upsertNode(
       };
     }
   }
+  } catch (e) {
+    // Roll back a partially-created node so a failed op can never orphan junk
+    // onto the page. Only remove what THIS call created (not pre-existing nodes
+    // and not the shared screen root).
+    if (!preExisted && node && node !== screen && !(node as SceneNode).removed) {
+      try { (node as SceneNode).remove(); } catch {}
+    }
+    throw e;
+  }
 }
 
 function removeNode(op: Extract<Op, { op: "remove" }>, ctx: ApplyCtx) {
   const node = findByDslId(ctx.screen, op.id);
   node?.remove(); // absent = already removed = idempotent success
+}
+
+/**
+ * Re-assert chrome (status bar / home indicator) absolute positions AFTER all
+ * ops in the build are applied. Chrome is created in the screen op (first),
+ * but every subsequent child insert reflows the auto-layout frame and can knock
+ * an absolutely-positioned child back into the flow (observed: status bar
+ * landing at the BOTTOM). Running this as the final step makes chrome position
+ * deterministic regardless of reflow. Idempotent and cheap.
+ */
+function positionChrome(frame: FrameNode) {
+  const specs: Array<[string, (n: SceneNode) => void]> = [
+    ["chrome-status-bar", (n) => { n.x = 0; n.y = 0; }],
+    ["chrome-home-indicator", (n) => { n.x = (frame.width - n.width) / 2; n.y = frame.height - n.height - 8; }],
+  ];
+  for (const [dslId, place] of specs) {
+    const n = frame.findOne((x) => x.getPluginData(PD_ID) === dslId) as (SceneNode & LayoutMixin) | null;
+    if (!n) continue;
+    if ("layoutPositioning" in n) n.layoutPositioning = "ABSOLUTE";
+    place(n);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -514,7 +562,9 @@ export async function applyBuildBatch(batch: BuildBatch): Promise<BatchAck> {
     acked.push(batch.batchIndex);
     ctx.screen.setPluginData(key, JSON.stringify(acked));
     if (batch.batchIndex === batch.totalBatches - 1) {
-      // build complete: store nodeMap for the reviewer
+      // build complete: re-assert chrome positions (reflow-proof final pass),
+      // then store nodeMap for the reviewer.
+      positionChrome(ctx.screen);
       const map: Record<string, string> = {};
       ctx.screen.findAll((n) => !!n.getPluginData(PD_ID))
         .forEach((n) => { map[n.getPluginData(PD_ID)] = n.id; });
