@@ -46,6 +46,7 @@ import {
   checkPixelDiffMissing,
   recordComparisonMarker,
 } from '../tools/reference-tracking';
+import { recordFindings, summarizeLedger } from '../tools/error-ledger';
 
 type CommandHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -355,6 +356,11 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         }
         lint.push(...checkPixelDiffMissing(page));
         if (lint.length > 0) {
+          // Persist to the durable error ledger (fire-and-forget) so recurring
+          // defects can later be analyzed and turned into new checks — the
+          // data layer of the auto-improvement loop. Never awaited: telemetry
+          // must not slow or fail a design call.
+          recordFindings(lint as Array<Record<string, unknown>>, page.name);
           return { ...(result as Record<string, unknown>), _lint: lint };
         }
       } catch {
@@ -466,6 +472,43 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
       currentPageName: figma.currentPage.name,
     };
   },
+
+  // review_screen: the per-screen quality gate. Runs the deterministic
+  // structural lint scoped to ONE built node (not the whole page), returns a
+  // pass/fail verdict + the exact list of what's wrong, and records every
+  // finding to the durable error ledger. This is the "compare and tell me
+  // what to fix, don't call it done until it's clean" gate — the front half of
+  // the auto-improvement loop. (Deterministic/structural only; the vision
+  // judgment layer — "the gear should be a bell" — is a separate phase.)
+  review_screen: async (params) => {
+    const nodeId = params.nodeId as string | undefined;
+    if (!nodeId) throw new Error('review_screen requires a `nodeId` (the built screen to review)');
+    const node = await figma.getNodeByIdAsync(nodeId);
+    if (!node) throw new Error(`Node not found: ${nodeId}`);
+    const page = figma.currentPage;
+    const pageHasRefFrames = page.children.some((n) => n.name.startsWith('REF /'));
+    const findings = runStructuralLint(node, pageHasRefFrames);
+    if (findings.length > 0) {
+      recordFindings(findings as unknown as Array<Record<string, unknown>>, page.name);
+    }
+    return {
+      nodeId,
+      nodeName: 'name' in node ? (node as SceneNode).name : nodeId,
+      pass: findings.length === 0,
+      verdict:
+        findings.length === 0
+          ? 'PASS — no structural defects found. (Structural only; still verify concept/copy against the reference image and run compare_to_reference for pixel drift.)'
+          : `NOT DONE — ${findings.length} defect${findings.length === 1 ? '' : 's'} must be fixed before this screen is finished.`,
+      findings,
+    };
+  },
+
+  // defect_report: read the durable error ledger back as an aggregate summary
+  // — which defect classes recur, how persistently, across how many sessions.
+  // This is the raw material the (later) analysis layer consumes to propose
+  // new deterministic checks; also directly useful to a human auditing where
+  // the agent keeps slipping.
+  defect_report: async () => summarizeLedger(),
 };
 
 /**
