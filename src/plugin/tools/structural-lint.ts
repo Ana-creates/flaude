@@ -474,6 +474,48 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           }
         }
       }
+
+      // 9. Label not centered in its button: a button-like frame (solid-
+      //    filled, short & wide, NOT auto-layout) whose SINGLE short text
+      //    label sits off-center — the exact defect where a "Continue"/
+      //    "Next" label was placed by a hand-typed y with textAlignVertical
+      //    TOP, so it hugs the top of the pill with unequal padding. The
+      //    pixel diff is blind to this (a few px of text offset is a tiny
+      //    fraction of the image), so it needs its own structural check.
+      //    FIX: make the label FILL the button and set textAlignHorizontal/
+      //    textAlignVertical = CENTER — equal padding by construction,
+      //    independent of font size — instead of hand-positioning the text.
+      if (
+        'children' in node &&
+        node.type !== 'INSTANCE' &&
+        (!('layoutMode' in node) || node.layoutMode === 'NONE') &&
+        node.height > 0 && node.height <= 72 && node.width >= 80 && node.width > node.height &&
+        !isInsideInstance(node)
+      ) {
+        const hasSolidFill =
+          'fills' in node && Array.isArray(node.fills) &&
+          node.fills.some((f) => f.type === 'SOLID' && (f.opacity === undefined || f.opacity > 0.3));
+        const textKids = node.children.filter(
+          (c): c is TextNode => c.type === 'TEXT' && c.visible !== false && (c.characters || '').trim().length > 0
+        );
+        if (hasSolidFill && textKids.length === 1 && (textKids[0].characters || '').length <= 24) {
+          const label = textKids[0];
+          const dyTop = label.y;
+          const dyBottom = node.height - (label.y + label.height);
+          const centerOffset = Math.abs(verticalCenter(label) - node.height / 2);
+          // Only flag a MEANINGFUL asymmetry (>4px off-center AND top/bottom
+          // padding differing by >6px) so a genuinely-centered label whose
+          // text box is a hair off doesn't nag.
+          if (centerOffset > 4 && Math.abs(dyTop - dyBottom) > 6) {
+            findings.push({
+              rule: 'label-not-centered-in-button',
+              nodeId: label.id,
+              nodeName: node.name,
+              message: `Label "${label.characters}" in button "${node.name}" is off-center: ${Math.round(dyTop)}px padding above vs ${Math.round(dyBottom)}px below. Make the label FILL the button (resize to the button's width×height at x:0,y:0) with textAlignHorizontal & textAlignVertical = CENTER, so padding is equal by construction — don't hand-type the label's y.`,
+            });
+          }
+        }
+      }
     }
 
     if ('children' in node) {
