@@ -472,13 +472,59 @@ function removeNode(op: Extract<Op, { op: "remove" }>, ctx: ApplyCtx) {
 function positionChrome(frame: FrameNode) {
   const specs: Array<[string, (n: SceneNode) => void]> = [
     ["chrome-status-bar", (n) => { n.x = 0; n.y = 0; }],
-    ["chrome-home-indicator", (n) => { n.x = (frame.width - n.width) / 2; n.y = frame.height - n.height - 8; }],
+    // Home indicator sits FLUSH at the bottom edge. The 34px component already
+    // bakes in the safe-area gap (the black pill is centered inside it), so an
+    // extra bottom offset would double-count and leave a visible gap below.
+    ["chrome-home-indicator", (n) => { n.x = (frame.width - n.width) / 2; n.y = frame.height - n.height; }],
   ];
   for (const [dslId, place] of specs) {
     const n = frame.findOne((x) => x.getPluginData(PD_ID) === dslId) as (SceneNode & LayoutMixin) | null;
     if (!n) continue;
     if ("layoutPositioning" in n) n.layoutPositioning = "ABSOLUTE";
     place(n);
+  }
+}
+
+// iOS bottom safe-area inset (pt). Matches the seeded home-indicator component
+// height (393x34, see ios-kit-seed populateHomeIndicatorComponent).
+const SAFE_AREA_BOTTOM = 34;
+
+/**
+ * Prevention: when a home indicator is present, a bar docked to the frame
+ * bottom (composer, tab bar, toolbar) must inset its CONTENT above the
+ * indicator's safe-area strip — otherwise the pill draws on top of the bar's
+ * controls (observed: WhatsApp composer icons under the pill).
+ *
+ * We raise the docked bar's paddingBottom to at least SAFE_AREA_BOTTOM. The
+ * bar's background still reaches the bottom edge (correct iOS toolbar look);
+ * only its content moves up. Runs as a FINAL pass — after positionChrome, when
+ * geometry has settled — the same "position-dependent work goes last" rule the
+ * chrome fix taught us.
+ *
+ * Idempotent: paddingBottom = max(existing, SAFE_AREA_BOTTOM), never +=.
+ * Safe: only applied when the vertical stack has a flexible (layoutGrow) child
+ * that can yield the space; without one, insetting would overflow/clip, so we
+ * leave it for the `content-under-home-indicator` lint rule to flag instead.
+ */
+function reserveBottomSafeArea(frame: FrameNode) {
+  const hi = frame.findOne((n) => n.getPluginData(PD_ID) === "chrome-home-indicator");
+  if (!hi) return;
+  if (frame.layoutMode !== "VERTICAL") return;
+
+  const inFlow = frame.children.filter(
+    (c) => ("layoutPositioning" in c ? (c as LayoutMixin).layoutPositioning !== "ABSOLUTE" : true)
+  );
+  const hasFlex = inFlow.some((c) => "layoutGrow" in c && (c as LayoutMixin).layoutGrow > 0);
+  if (!hasFlex) return; // can't inset without overflow; lint will catch it
+
+  // The docked bottom bar is the last in-flow child that is an auto-layout
+  // frame (a spacer/flex region is skipped — it has nothing to inset).
+  for (let i = inFlow.length - 1; i >= 0; i--) {
+    const bar = inFlow[i] as FrameNode;
+    if (bar.type !== "FRAME" || !("layoutMode" in bar) || bar.layoutMode === "NONE") continue;
+    if (bar.layoutGrow > 0) continue; // the flex region, not a bar
+    if (bar.paddingBottom < SAFE_AREA_BOTTOM) bar.paddingBottom = SAFE_AREA_BOTTOM;
+    break;
   }
 }
 
@@ -563,8 +609,10 @@ export async function applyBuildBatch(batch: BuildBatch): Promise<BatchAck> {
     ctx.screen.setPluginData(key, JSON.stringify(acked));
     if (batch.batchIndex === batch.totalBatches - 1) {
       // build complete: re-assert chrome positions (reflow-proof final pass),
-      // then store nodeMap for the reviewer.
+      // reserve bottom safe-area under the home indicator, then store nodeMap
+      // for the reviewer.
       positionChrome(ctx.screen);
+      reserveBottomSafeArea(ctx.screen);
       const map: Record<string, string> = {};
       ctx.screen.findAll((n) => !!n.getPluginData(PD_ID))
         .forEach((n) => { map[n.getPluginData(PD_ID)] = n.id; });

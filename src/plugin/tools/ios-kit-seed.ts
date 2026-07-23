@@ -229,7 +229,9 @@ function populateHomeIndicatorComponent(component: ComponentNode): void {
   pill.name = 'Pill';
   pill.resize(134, 5);
   pill.x = (393 - 134) / 2;
-  pill.y = (34 - 5) / 2 - 4;
+  // Bottom-anchored ~8px from the frame's bottom edge (real iOS), not centered.
+  // Centering left an ~18px gap below the pill and only ~11px above.
+  pill.y = 34 - 5 - 8;
   pill.cornerRadius = 100;
   pill.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, opacity: 1 }];
   component.appendChild(pill);

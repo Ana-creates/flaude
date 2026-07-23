@@ -48,6 +48,10 @@ const IOS_CHROME_DIMENSIONS: Array<{
 
 const BUTTON_NAME_PATTERN = /button|pill|btn|cta/i;
 
+/** iOS bottom safe-area (home-indicator) inset in px. Mirrors the applier's
+ * SAFE_AREA_BOTTOM so the lint threshold and the auto-inset agree. */
+const SAFE_AREA_INSET = 34;
+
 function within(actual: number, target: number, tolerance: number): boolean {
   return Math.abs(actual - target) <= tolerance;
 }
@@ -553,6 +557,45 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
               nodeName: sceneNode.name,
               message: `"${sceneNode.name}" is a bottom-anchored ${Math.round(w)}×${Math.round(h)} IMAGE fill — a screenshot of a keyboard/keypad. NEVER crop the keyboard: call \`await flaude.keyboard({ mode: "Light" | "Dark" })\` for the bundled QWERTY keyboard, or reconstruct a numeric keypad as real nodes (each key a frame + centered text). Cropping standard iOS chrome you can build is not allowed.`,
             });
+          }
+        }
+      }
+
+      // 11. Content under home indicator: a bar docked to the frame bottom
+      //     (composer / tab bar / toolbar) whose CONTENT isn't inset above the
+      //     home indicator's safe-area strip, so the pill draws over the bar's
+      //     controls (observed: WhatsApp composer icons under the pill). Fires
+      //     only when a home indicator is actually present, and only on a
+      //     bottom-flush bar with paddingBottom < the safe-area inset. The
+      //     applier's reserveBottomSafeArea() prevents this when the layout has
+      //     a flex region; this rule catches the cases it can't (no flex
+      //     region, or freeform figma_execute builds that bypass the compiler).
+      if (node.type === 'FRAME' && 'layoutMode' in node && node.layoutMode === 'VERTICAL') {
+        const kids = node.children as SceneNode[];
+        const hasHomeIndicator = kids.some((k) =>
+          /home.?indicator/i.test(k.name) ||
+          (within(k.width, 134, 12) && within(k.height, 5, 3)) ||
+          (within(k.width, node.width, 8) && within(k.height, 34, 4) && /indicator/i.test(k.name))
+        );
+        if (hasHomeIndicator) {
+          const inFlow = kids.filter(
+            (k) => !('layoutPositioning' in k) || (k as SceneNode & LayoutMixin).layoutPositioning !== 'ABSOLUTE'
+          );
+          for (let i = inFlow.length - 1; i >= 0; i--) {
+            const bar = inFlow[i];
+            if (bar.type !== 'FRAME' || !('layoutMode' in bar) || bar.layoutMode === 'NONE') continue;
+            if ((bar as FrameNode).layoutGrow > 0) continue; // flex region, not a bar
+            const barFrame = bar as FrameNode;
+            const bottomFlush = Math.abs((bar.y + bar.height) - node.height) <= 4;
+            if (bottomFlush && barFrame.paddingBottom < SAFE_AREA_INSET) {
+              findings.push({
+                rule: 'content-under-home-indicator',
+                nodeId: barFrame.id,
+                nodeName: barFrame.name,
+                message: `Bottom-docked bar "${barFrame.name}" has paddingBottom ${Math.round(barFrame.paddingBottom)}px but a home indicator sits in the bottom ${SAFE_AREA_INSET}px safe-area — the pill will draw over the bar's controls. Set paddingBottom >= ${SAFE_AREA_INSET} so the content insets above the indicator (the bar's background can still reach the bottom edge). A flexible sibling (layoutGrow) yields the space.`,
+              });
+            }
+            break;
           }
         }
       }
