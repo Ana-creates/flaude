@@ -216,6 +216,122 @@ export function recordDefect(input: RecordDefectInput): { recorded: boolean; rul
   return { recorded: true, ruleClass };
 }
 
+// ===========================================================================
+// SELF-SHARPENING REVIEWER — the wire that closes the loop.
+//
+// The visual reviewer works from ~6 universal PRINCIPLES, not a growing
+// checklist. It has blind spots (tonight it missed ALIGNMENT and
+// CONTAINMENT). The old loop was: reviewer misses -> a HUMAN catches it ->
+// a HUMAN edits the reviewer. That is not self-sharpening.
+//
+// This closes it mechanically: every time a reviewer MISS is caught (by a
+// human, or by a later automated check), it's recorded here TAGGED BY
+// PRINCIPLE. Before the NEXT review, the reviewer loads `getReviewerSharpening`
+// -> a short "you have historically under-checked these principles, look
+// twice" preamble ranked by how often it has slipped. The reviewer's prompt
+// stays small (still 6 principles) but its ATTENTION re-weights toward its
+// own real weak spots, from evidence, with no human edit. That is the
+// difference between "self-sharpening" as a word and as a fact.
+// ===========================================================================
+
+/** The 6 universal principles the visual reviewer checks. A reviewer miss is
+ * always an instance of exactly one of these — so misses cluster onto a fixed
+ * small set of dials to sharpen, instead of an ever-growing checklist. */
+export const REVIEW_PRINCIPLES = [
+  'color-fidelity',
+  'elevation',
+  'structure-containment',
+  'alignment',
+  'spacing-size',
+  'completeness-type',
+] as const;
+export type ReviewPrinciple = (typeof REVIEW_PRINCIPLES)[number];
+
+const REVIEWER_MISS_PREFIX = 'reviewer-miss';
+
+function normalizePrinciple(p: string): ReviewPrinciple {
+  const s = str(p).trim().toLowerCase().replace(/[\s_]+/g, '-');
+  return (REVIEW_PRINCIPLES as readonly string[]).includes(s)
+    ? (s as ReviewPrinciple)
+    : 'completeness-type';
+}
+
+export interface RecordReviewerMissInput {
+  /** Which of the 6 principles the reviewer FAILED to enforce (it passed a
+   * screen that violated this). Free-form is coerced to the nearest principle. */
+  principle: string;
+  /** What the reviewer missed on this screen, concretely. */
+  message: string;
+  page?: string;
+  /** 'manual' = a human caught the miss; 'auto' = a later check did. */
+  source?: 'manual' | 'auto';
+}
+
+/**
+ * Record that the REVIEWER missed a defect (it signed off, but the screen was
+ * wrong on `principle`). Logged into the same durable ledger under a
+ * `reviewer-miss:<principle>` class so misses cluster by principle.
+ */
+export function recordReviewerMiss(
+  input: RecordReviewerMissInput
+): { recorded: boolean; principle: ReviewPrinciple } {
+  const principle = normalizePrinciple(input.principle);
+  const now = Date.now();
+  const entry = normalize(
+    { rule: `${REVIEWER_MISS_PREFIX}:${principle}`, message: input.message },
+    str(input.page) || 'unknown',
+    now,
+    'vision'
+  );
+  if (!entry) return { recorded: false, principle };
+  appendEntries([entry]);
+  return { recorded: true, principle };
+}
+
+export interface ReviewerSharpening {
+  /** Principles the reviewer has historically under-checked, most-missed
+   * first, with how many times each slipped and example misses. */
+  weakPrinciples: Array<{ principle: ReviewPrinciple; misses: number; examples: string[] }>;
+  /** Ready-to-prepend preamble for the reviewer's next run. Empty string when
+   * there's no miss history yet. */
+  preamble: string;
+}
+
+/**
+ * Build the reviewer's "look twice at these" preamble from its own recorded
+ * miss history. This is loaded BEFORE each review so the reviewer re-weights
+ * attention toward its real weak spots — the mechanical close of the loop.
+ */
+export async function getReviewerSharpening(): Promise<ReviewerSharpening> {
+  const entries = await loadRaw();
+  const byPrinciple = new Map<ReviewPrinciple, { misses: number; examples: Set<string> }>();
+  for (const e of entries) {
+    if (!e.rule.startsWith(`${REVIEWER_MISS_PREFIX}:`)) continue;
+    const principle = normalizePrinciple(e.rule.slice(REVIEWER_MISS_PREFIX.length + 1));
+    const agg = byPrinciple.get(principle) ?? { misses: 0, examples: new Set<string>() };
+    agg.misses += e.count;
+    if (e.message && agg.examples.size < 2) agg.examples.add(e.message);
+    byPrinciple.set(principle, agg);
+  }
+  const weakPrinciples = Array.from(byPrinciple.entries())
+    .map(([principle, v]) => ({ principle, misses: v.misses, examples: Array.from(v.examples) }))
+    .sort((a, b) => b.misses - a.misses);
+
+  let preamble = '';
+  if (weakPrinciples.length > 0) {
+    const lines = weakPrinciples
+      .slice(0, 4)
+      .map(
+        (w) =>
+          `- ${w.principle} (missed ${w.misses}×)${w.examples[0] ? ` — e.g. "${w.examples[0]}"` : ''}`
+      );
+    preamble =
+      `LOOK TWICE — you have historically UNDER-CHECKED these principles; scrutinize them ` +
+      `hardest on this screen before signing off:\n${lines.join('\n')}`;
+  }
+  return { weakPrinciples, preamble };
+}
+
 export interface LedgerSummary {
   totalDistinctDefects: number;
   totalObservations: number;

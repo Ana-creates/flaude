@@ -46,7 +46,14 @@ import {
   checkPixelDiffMissing,
   recordComparisonMarker,
 } from '../tools/reference-tracking';
-import { recordFindings, summarizeLedger, recordDefect, proposePrevention } from '../tools/error-ledger';
+import {
+  recordFindings,
+  summarizeLedger,
+  recordDefect,
+  proposePrevention,
+  recordReviewerMiss,
+  getReviewerSharpening,
+} from '../tools/error-ledger';
 
 type CommandHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -535,6 +542,26 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     const minSessions = typeof params.minSessions === 'number' ? params.minSessions : 1;
     return proposePrevention(minObservations, minSessions);
   },
+
+  // record_reviewer_miss: the SELF-SHARPENING intake. When the visual reviewer
+  // signed off on a screen that was actually wrong on one of its 6 principles
+  // (a human or a later check caught it), log the miss tagged by principle.
+  record_reviewer_miss: async (params) => {
+    const principle = params.principle as string | undefined;
+    if (!principle) throw new Error('record_reviewer_miss requires a `principle` (one of the 6 review principles)');
+    return recordReviewerMiss({
+      principle,
+      message: (params.message as string) ?? '',
+      page: params.page as string | undefined,
+      source: params.source === 'auto' ? 'auto' : 'manual',
+    });
+  },
+
+  // get_reviewer_sharpening: called BEFORE each review. Returns a "look twice
+  // at these principles" preamble built from the reviewer's own recorded miss
+  // history, so its attention re-weights toward its real weak spots with no
+  // human edit — the mechanical close of the self-sharpening loop.
+  get_reviewer_sharpening: async () => getReviewerSharpening(),
 };
 
 /**
