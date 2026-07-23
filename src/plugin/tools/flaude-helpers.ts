@@ -143,12 +143,18 @@ export async function flaudeIcon(concept: string, opts: FlaudeIconOptions = {}):
   inst.resize(size, size);
   if (opts.color) {
     const color = opts.color;
-    for (const child of inst.children) {
-      if ('strokes' in child && Array.isArray(child.strokes) && child.strokes.length > 0) {
-        child.strokes = child.strokes.map((s) => (s.type === 'SOLID' ? { ...s, color } : s));
+    // Recolor EVERY paint-bearing node in the subtree, not just direct
+    // children. SVG-seeded icons (figma.createNodeFromSvg) nest their vectors
+    // inside a wrapper frame/group, so a direct-children-only pass left those
+    // vectors at their baked SVG color (observed: a blue Face ID icon rendered
+    // black). findAll walks the whole instance subtree.
+    const targets = [inst, ...inst.findAll(() => true)] as SceneNode[];
+    for (const node of targets) {
+      if ('strokes' in node && Array.isArray(node.strokes) && node.strokes.length > 0) {
+        (node as GeometryMixin).strokes = node.strokes.map((s) => (s.type === 'SOLID' ? { ...s, color } : s));
       }
-      if ('fills' in child && Array.isArray(child.fills) && child.fills.length > 0) {
-        child.fills = child.fills.map((f) => (f.type === 'SOLID' ? { ...f, color } : f));
+      if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
+        (node as GeometryMixin).fills = node.fills.map((f) => (f.type === 'SOLID' ? { ...f, color } : f));
       }
     }
   }
