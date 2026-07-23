@@ -167,6 +167,51 @@ function hasFlatSolidFill(node: SceneNode): boolean {
   return fills[0].type === 'SOLID';
 }
 
+function isShortInitials(t: BaseNode): boolean {
+  if (t.type !== 'TEXT') return false;
+  const chars = ((t as TextNode).characters || '').trim();
+  return chars.length > 0 && chars.length <= 3;
+}
+
+/**
+ * True if an avatar-sized shape has a short (≤3-char) text centered OVER it —
+ * i.e. it's a deliberate INITIALS / letter avatar (a legitimate final design
+ * that matches references which show letter avatars for contacts without a
+ * photo), NOT a blank placeholder awaiting a real image. Without this, the
+ * avatar-placeholder rule fired on every "EJ"/"TM" letter avatar and buried
+ * the real signal (genuine blank photo-placeholders) under dozens of false
+ * nudges. A true photo-placeholder has no centered initials — its name label
+ * sits BELOW it (and is usually >3 chars), so it is still correctly flagged.
+ */
+function hasCenteredInitials(node: SceneNode): boolean {
+  // avatar-as-frame: initials are a child, compared in the avatar's LOCAL coords
+  if ('children' in node) {
+    for (const c of node.children) {
+      if (!isShortInitials(c)) continue;
+      const ccx = c.x + c.width / 2;
+      const ccy = c.y + c.height / 2;
+      if (Math.abs(ccx - node.width / 2) <= node.width / 2 && Math.abs(ccy - node.height / 2) <= node.height / 2) {
+        return true;
+      }
+    }
+  }
+  // avatar + separately-positioned initials sibling: compared in PARENT coords
+  const parent = node.parent;
+  if (parent && 'children' in parent) {
+    const cx = node.x + node.width / 2;
+    const cy = node.y + node.height / 2;
+    for (const s of parent.children) {
+      if (s === node || !isShortInitials(s)) continue;
+      const scx = s.x + s.width / 2;
+      const scy = s.y + s.height / 2;
+      if (Math.abs(scx - cx) <= node.width / 2 && Math.abs(scy - cy) <= node.height / 2) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function nearSquare(width: number, height: number): boolean {
   if (width === 0 || height === 0) return false;
   const ratio = width / height;
@@ -262,7 +307,8 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         (node.type === 'ELLIPSE' || node.type === 'RECTANGLE' || node.type === 'FRAME') &&
         w >= AVATAR_MIN && w <= AVATAR_MAX && h >= AVATAR_MIN && h <= AVATAR_MAX &&
         nearSquare(w, h) &&
-        hasFlatSolidFill(sceneNode)
+        hasFlatSolidFill(sceneNode) &&
+        !hasCenteredInitials(sceneNode)
       ) {
         findings.push({
           rule: 'avatar-placeholder',
