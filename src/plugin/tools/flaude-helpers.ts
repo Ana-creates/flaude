@@ -17,6 +17,21 @@ import { seedIosKit } from './ios-kit-seed';
 import { reconstructComponent } from './keyboard-reconstruct';
 import keyboardLightExport from '../assets/keyboard-light.json';
 import keyboardDarkExport from '../assets/keyboard-dark.json';
+// The 54 premade core icons, bundled into the plugin EXACTLY like the
+// keyboard exports above — the asset ships inside the build. This is what
+// makes flaude.icon('home') work with ZERO args in any file: the SVG source
+// is always present, so a premade concept can never "fail to place" for lack
+// of a get_core_icons round-trip (the exact failure that let a swallowed
+// wrong-name call go silent). get_core_icons (server-side) stays the source
+// of truth; keep this bundled copy in sync if the core set changes.
+import coreIconsBundle from '../assets/core-icons.json';
+
+interface CoreIconEntry {
+  concept: string;
+  name: string;
+  svg: string;
+}
+const CORE_ICONS = coreIconsBundle as Record<string, CoreIconEntry>;
 
 const ICONS_PAGE_NAME = '_Flaude Icons';
 
@@ -40,36 +55,82 @@ async function findIconComponent(concept: string): Promise<ComponentNode | null>
 }
 
 export interface FlaudeIconOptions {
-  /** SVG source and display name from get_core_icons \u2014 REQUIRED the first
-   * time a concept is used in this file; omit on later calls, since by then
-   * the component already exists and will be found by search. */
+  /** Optional SVG source + display name to seed a NON-core concept the first
+   * time it's used in this file. The 54 premade core concepts do NOT need
+   * these — they self-seed from the bundled core-icon set (see CORE_ICONS),
+   * exactly like flaude.keyboard() self-seeds from its bundled export. Pass
+   * them only for a genuinely custom concept not in the core set, or to
+   * deliberately override a core icon's art. */
   svg?: string;
   name?: string;
   size?: number;
   color?: RGB;
 }
 
+export interface FailedIconLookup {
+  concept: string;
+  message: string;
+}
+
+// Root cause (production incident): builder code called flaude.icon("x", ...)
+// and flaude.icon("message-circle", ...) \u2014 plausible-sounding but WRONG
+// concept names, guessed from memory instead of read from get_core_icons'
+// actual 54-name list (the real names are "close" and "chat"). flaudeIcon
+// DID throw immediately with a clear message, exactly as designed \u2014 but the
+// calling code wrapped the call in `try { ... } catch (e) {}`, which is
+// legal, unremarkable-looking JS that silently discarded that message. No
+// prose rule ("don't swallow errors") can stop an agent from writing a
+// try/catch under time pressure. So: record every failed lookup at module
+// scope regardless of whether the caller catches the throw, and
+// command-handler.ts's `execute` unconditionally merges these into `_lint`
+// after EVERY figma_execute call \u2014 the same "agent code can hide the
+// symptom, but not the tool's own record of what it did" pattern
+// reference-tracking.ts already uses for skipped screenshots.
+const failedIconLookups: FailedIconLookup[] = [];
+
+/** Drains (reads AND clears) failed icon lookups recorded since the last
+ * drain \u2014 called once per figma_execute call so `_lint` reports exactly
+ * the failures from THIS call, not a growing lifetime backlog. */
+export function drainFailedIconLookups(): FailedIconLookup[] {
+  return failedIconLookups.splice(0, failedIconLookups.length);
+}
+
 /**
  * Search the WHOLE file for an existing `<concept> \u00b7 ...` icon component;
- * if missing and `opts.svg`/`opts.name` are provided (from calling
- * get_core_icons first), seed it once on the "_Flaude Icons" page. Always
- * returns a fresh createInstance() \u2014 never a hand-drawn shape.
+ * if missing, seed it once on the "_Flaude Icons" page — from the bundled
+ * core-icon set for any of the 54 premade concepts (zero args needed), or
+ * from an explicit `opts.svg`/`opts.name` for a genuinely custom concept.
+ * Always returns a fresh createInstance() — never a hand-drawn shape. This is
+ * the exact keyboard pattern: bundled asset is the self-seeding fallback, so
+ * the correct call (flaude.icon('home')) is also the shortest.
  */
 export async function flaudeIcon(concept: string, opts: FlaudeIconOptions = {}): Promise<InstanceNode> {
   let master = await findIconComponent(concept);
   if (!master) {
-    if (!opts.svg || !opts.name) {
-      throw new Error(
-        `No existing icon component found for "${concept}". Call get_core_icons ` +
-          `({ concepts: ["${concept}"] }) and pass the result's svg/name to ` +
-          `flaude.icon("${concept}", { svg, name }) to seed it once \u2014 do not ` +
-          `hand-draw it with figma.createNodeFromSvg directly.`
-      );
+    // An explicit opts.svg/name override wins; otherwise fall back to the
+    // bundled premade set. Only a concept that is NEITHER already-in-file,
+    // NOR in the bundle, NOR given an explicit svg (e.g. a typo like 'x' or
+    // 'message-circle') reaches the throw — which is correct: that IS an
+    // unresolvable icon, and it's still recorded for _lint even if the
+    // caller swallows the throw.
+    const bundled = CORE_ICONS[concept];
+    const svg = opts.svg ?? bundled?.svg;
+    const name = opts.name ?? bundled?.name;
+    if (!svg || !name) {
+      const message =
+        `"${concept}" is not a premade core icon and no { svg, name } was given. ` +
+        `Call get_core_icons (no filter) to see the ${Object.keys(CORE_ICONS).length} valid ` +
+        `concept names — it's most likely a typo (e.g. "x" → "close", ` +
+        `"message-circle" → "chat"). For a genuinely new concept, pass ` +
+        `flaude.icon("${concept}", { svg, name }) so it seeds as a reusable ` +
+        `component — do not hand-draw it with figma.createNodeFromSvg directly.`;
+      failedIconLookups.push({ concept, message });
+      throw new Error(message);
     }
     const page = getOrCreateIconsPage();
-    const svgNode = figma.createNodeFromSvg(opts.svg);
+    const svgNode = figma.createNodeFromSvg(svg);
     master = figma.createComponent();
-    master.name = `${concept} \u00b7 ${opts.name}`;
+    master.name = `${concept} · ${name}`;
     master.resize(svgNode.width, svgNode.height);
     master.appendChild(svgNode);
     svgNode.x = 0;

@@ -24,6 +24,32 @@ export function recordScreenshot(node: { id: string; name: string }): void {
   }
 }
 
+// Root cause (production incident): a screen was built with circular
+// buttons where the reference clearly showed rounded rectangles. The agent
+// HAD screenshotted both the reference and its own built output \u2014 the
+// existing built-without-reference-capture check would have passed \u2014 and
+// still missed the defect, because "eyeball two screenshots side by side"
+// is unreliable for exactly this class of drift (easy to miss by eye, easy
+// to catch with a real per-pixel diff). The `compare_to_reference` MCP tool
+// exists precisely to replace that eyeball judgment with a deterministic
+// pixelmatch score \u2014 but nothing forced it to actually be called; under
+// batching pressure it was skipped entirely for all 5 screens in that pass.
+//
+// `compare_to_reference` runs on the MCP server (pixelmatch lives in Node,
+// not the plugin sandbox), but it calls the SAME plugin `screenshot`
+// command twice (once per node) to fetch the pixels it diffs. Piggybacking
+// a `comparePairKey` marker on those two calls lets the plugin \u2014 which
+// otherwise has no visibility into what the MCP server did with the bytes
+// it returned \u2014 record that a REAL pixel comparison happened for this
+// specific (ref, built) pair, not just that someone looked at each image.
+const comparedPairKeys = new Set<string>();
+
+/** Call this whenever `screenshot` is invoked with a `comparePairKey` param
+ * (set by `compare_to_reference`, never by a plain figma_screenshot call). */
+export function recordComparisonMarker(pairKey: string): void {
+  comparedPairKeys.add(pairKey);
+}
+
 export interface ReferenceCaptureFinding {
   rule: 'built-without-reference-capture';
   builtNodeId: string;
@@ -75,6 +101,64 @@ export function checkReferenceCaptured(
       refNodeId: ref.id,
       refNodeName: ref.name,
       message: `\u26a0\ufe0f BUILT WITHOUT CAPTURING REFERENCE \u2014 "${child.name}" was created but "${ref.name}" was never screenshotted this session. Call figma_screenshot on "${ref.name}" (id ${ref.id}) and compare pixel-by-pixel before trusting this screen; REFERENCE-MATCH MODE requires holding the reference image, not building from the flow's text metadata.`,
+    });
+  }
+
+  return findings;
+}
+
+export interface PixelDiffMissingFinding {
+  rule: 'built-without-pixel-diff';
+  builtNodeId: string;
+  builtNodeName: string;
+  refNodeId: string;
+  refNodeName: string;
+  message: string;
+}
+
+/**
+ * Scan ALL `<AppName> / <ScreenName>` frames currently on `page` (not just
+ * ones created THIS call \u2014 a real pixel diff naturally happens in a
+ * separate, later figma_execute/compare_to_reference round-trip, after the
+ * screen already exists) and flag any whose matching `REF / <ScreenName>`
+ * sibling exists but was never actually diffed against it via
+ * `compare_to_reference` this session. Catches defects (wrong shape, wrong
+ * corner radius, wrong color) that survive an eyeball comparison of two
+ * screenshots but show up immediately as a real pixel delta.
+ */
+export function checkPixelDiffMissing(page: PageNode): PixelDiffMissingFinding[] {
+  const findings: PixelDiffMissingFinding[] = [];
+
+  const refByScreenName = new Map<string, { id: string; name: string }>();
+  for (const child of page.children) {
+    if (child.name.startsWith('REF /')) {
+      const screenName = child.name.slice('REF /'.length).trim();
+      refByScreenName.set(screenName, { id: child.id, name: child.name });
+    }
+  }
+  if (refByScreenName.size === 0) return findings;
+
+  for (const child of page.children) {
+    if (child.type !== 'FRAME' && child.type !== 'COMPONENT') continue;
+    if (child.name.startsWith('REF /')) continue;
+
+    const separatorIndex = child.name.indexOf(' / ');
+    if (separatorIndex === -1) continue;
+    const screenName = child.name.slice(separatorIndex + 3).trim();
+
+    const ref = refByScreenName.get(screenName);
+    if (!ref) continue;
+
+    const pairKey = `${ref.id}::${child.id}`;
+    if (comparedPairKeys.has(pairKey)) continue;
+
+    findings.push({
+      rule: 'built-without-pixel-diff',
+      builtNodeId: child.id,
+      builtNodeName: child.name,
+      refNodeId: ref.id,
+      refNodeName: ref.name,
+      message: `\u26a0\ufe0f NEVER PIXEL-DIFFED \u2014 "${child.name}" exists alongside "${ref.name}" but compare_to_reference has never been called for this pair this session. Eyeballing two screenshots misses shape/color/geometry drift (e.g. a circular button where the reference shows a rounded rectangle) that a real pixel diff catches immediately \u2014 call compare_to_reference({ refNodeId: "${ref.id}", builtNodeId: "${child.id}" }) before considering this screen done.`,
     });
   }
 

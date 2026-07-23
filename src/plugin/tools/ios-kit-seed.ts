@@ -43,6 +43,12 @@ const BATTERY_SVG = `<svg width="25" height="12" viewBox="0 0 25 12" fill="none"
 interface SeedResult {
   created: string[];
   alreadyPresent: string[];
+  /** Existing components that failed their own bounds self-check and were
+   * repopulated in place — every existing instance across the file updates
+   * automatically since the component id is unchanged. Surfaced explicitly
+   * (not folded into `created`) so callers/agents SEE that a previously-
+   * broken shared asset just got fixed everywhere at once. */
+  healed: string[];
   componentIds: {
     statusBar: string;
     homeIndicator: string;
@@ -69,11 +75,81 @@ async function findExistingComponent(name: string): Promise<ComponentNode | null
   return (matches.find((c) => c.name === name) as ComponentNode | undefined) ?? null;
 }
 
-async function createStatusBarComponent(page: PageNode): Promise<ComponentNode> {
-  const component = figma.createComponent();
-  component.name = STATUS_BAR_COMPONENT_NAME;
-  component.resize(393, 44);
+/**
+ * Self-check: every child (at any depth) of a freshly-built kit component
+ * must fit within the component's own declared bounds.
+ *
+ * Root cause this catches: `figma.createFrame()` returns a node at Figma's
+ * factory-default 100x100 size. The original `createStatusBarComponent`
+ * appended real content to a `Glyphs` frame but only ever set
+ * `counterAxisAlignItems` on it — never `counterAxisSizingMode` — so the
+ * frame stayed FIXED at the untouched default height of 100 inside a 44px-
+ * tall status bar. With `clipsContent = false` on the outer bar, that
+ * produced no error and no visual symptom inside a plain node inspection;
+ * it only became visible as icons floating outside the status bar in an
+ * actual screenshot, on the Nth screen that used it, in production.
+ *
+ * This assertion converts that failure mode from "silent, discovered late
+ * by a human eyeballing a screenshot" into "loud, thrown immediately inside
+ * the same seed_ios_kit call that built the broken component" — the same
+ * mechanical-verification principle as compare_to_reference and
+ * structural-lint, applied to our OWN bundled/trusted output, not just
+ * agent-authored figma_execute code.
+ */
+function assertChildrenWithinBounds(component: ComponentNode): void {
+  const problems: string[] = [];
+  const EPS = 0.5;
+
+  function walk(node: SceneNode, offsetX: number, offsetY: number): void {
+    const absX = offsetX + node.x;
+    const absY = offsetY + node.y;
+    if (
+      absX < -EPS ||
+      absY < -EPS ||
+      absX + node.width > component.width + EPS ||
+      absY + node.height > component.height + EPS
+    ) {
+      problems.push(
+        `"${node.name}" (${Math.round(node.width)}x${Math.round(node.height)} at ${Math.round(absX)},${Math.round(absY)}) overflows the ${Math.round(component.width)}x${Math.round(component.height)} component bounds`
+      );
+    }
+    if ('children' in node) {
+      for (const child of node.children) walk(child, absX, absY);
+    }
+  }
+
+  for (const child of component.children) walk(child, 0, 0);
+
+  if (problems.length > 0) {
+    throw new Error(
+      `seed_ios_kit: "${component.name}" failed its own bounds self-check after being built — ${problems.join('; ')}. ` +
+        `This is a sizing-mode bug in the builder function (e.g. a child frame that kept Figma's default 100x100 size instead of hugging its real content) — fix the builder, do not ship a component that fails its own geometry check.`
+    );
+  }
+}
+
+function clearChildren(component: ComponentNode): void {
+  for (const child of [...component.children]) child.remove();
+}
+
+async function populateStatusBarComponent(component: ComponentNode): Promise<void> {
   component.layoutMode = 'HORIZONTAL';
+  // BUG FIXED HERE: this was left 'AUTO' (hug), which sounds harmless but
+  // means the WHOLE bar's own width shrinks to wrap only its content (time
+  // text + glyph cluster) instead of staying a fixed-width bar — there is
+  // no leftover space left for `primaryAxisAlignItems: SPACE_BETWEEN` to
+  // distribute, so the time and the signal/wifi/battery cluster end up
+  // bunched together near the left edge instead of pinned to opposite
+  // sides. `resize()` below only takes effect with primaryAxisSizingMode
+  // FIXED — with AUTO it's silently overridden back to the hugged size the
+  // very next layout pass, the same "resize() no-ops" failure mode as the
+  // button-hug-both-axes defect class, just on the container instead of a
+  // button. 390 matches this file's dominant screen width; instances can
+  // still be resized narrower/wider per screen since the axis is FIXED, not
+  // locked — FIXED means "has an explicit width", not "can't be resized".
+  component.primaryAxisSizingMode = 'FIXED';
+  component.counterAxisSizingMode = 'FIXED';
+  component.resize(390, 44);
   component.primaryAxisAlignItems = 'SPACE_BETWEEN';
   component.counterAxisAlignItems = 'CENTER';
   component.paddingLeft = 20;
@@ -108,6 +184,16 @@ async function createStatusBarComponent(page: PageNode): Promise<ComponentNode> 
   const glyphs = figma.createFrame();
   glyphs.name = 'Glyphs';
   glyphs.layoutMode = 'HORIZONTAL';
+  // BUG FIXED HERE: `figma.createFrame()` starts at Figma's factory-default
+  // 100x100. Without explicitly setting BOTH sizing modes to hug content,
+  // the frame's height silently stayed at that default 100 forever (width
+  // happened to shrink because HORIZONTAL layoutMode defaults its primary
+  // axis to hug) — see assertChildrenWithinBounds's doc comment above for
+  // how that actually manifested. Setting both axes to AUTO makes this
+  // frame's size ALWAYS derive from its real icon content, never a leftover
+  // factory default.
+  glyphs.primaryAxisSizingMode = 'AUTO';
+  glyphs.counterAxisSizingMode = 'AUTO';
   glyphs.itemSpacing = 5;
   glyphs.counterAxisAlignItems = 'CENTER';
   glyphs.fills = [];
@@ -123,13 +209,18 @@ async function createStatusBarComponent(page: PageNode): Promise<ComponentNode> 
     glyphs.appendChild(node);
   }
 
+  assertChildrenWithinBounds(component);
+}
+
+async function createStatusBarComponent(page: PageNode): Promise<ComponentNode> {
+  const component = figma.createComponent();
+  component.name = STATUS_BAR_COMPONENT_NAME;
   page.appendChild(component);
+  await populateStatusBarComponent(component);
   return component;
 }
 
-function createHomeIndicatorComponent(page: PageNode): ComponentNode {
-  const component = figma.createComponent();
-  component.name = HOME_INDICATOR_COMPONENT_NAME;
+function populateHomeIndicatorComponent(component: ComponentNode): void {
   component.resize(393, 34);
   component.fills = [];
   component.clipsContent = false;
@@ -143,7 +234,14 @@ function createHomeIndicatorComponent(page: PageNode): ComponentNode {
   pill.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, opacity: 1 }];
   component.appendChild(pill);
 
+  assertChildrenWithinBounds(component);
+}
+
+function createHomeIndicatorComponent(page: PageNode): ComponentNode {
+  const component = figma.createComponent();
+  component.name = HOME_INDICATOR_COMPONENT_NAME;
   page.appendChild(component);
+  populateHomeIndicatorComponent(component);
   return component;
 }
 
@@ -192,8 +290,47 @@ async function createKeyboardComponent(page: PageNode): Promise<ComponentNode> {
     y += keyHeight + rowGap;
   }
 
+  assertChildrenWithinBounds(component);
   page.appendChild(component);
   return component;
+}
+
+interface ExpectedShape {
+  width: number;
+  height: number;
+  primaryAxisSizingMode?: 'FIXED' | 'AUTO';
+}
+
+/**
+ * A hug-sized (AUTO) auto-layout frame is internally self-consistent \u2014
+ * children always fit inside a container that grows to wrap them, so
+ * `assertChildrenWithinBounds` alone can never catch "this hugged to the
+ * wrong size instead of being a fixed-width bar" (the actual bug behind the
+ * status bar rendering with everything bunched at the left instead of
+ * spread via SPACE_BETWEEN). When `expected` is given, also fail health if
+ * the live component's own dimensions/sizing-mode drifted from the
+ * builder's current canonical shape \u2014 so a component built by an OLDER
+ * version of this file's logic gets healed even when it isn't, technically,
+ * overflowing anything.
+ */
+function isHealthy(component: ComponentNode, expected?: ExpectedShape): boolean {
+  try {
+    assertChildrenWithinBounds(component);
+  } catch {
+    return false;
+  }
+  if (expected) {
+    if (Math.abs(component.width - expected.width) > 0.5) return false;
+    if (Math.abs(component.height - expected.height) > 0.5) return false;
+    if (
+      expected.primaryAxisSizingMode &&
+      'primaryAxisSizingMode' in component &&
+      component.primaryAxisSizingMode !== expected.primaryAxisSizingMode
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -204,29 +341,52 @@ async function createKeyboardComponent(page: PageNode): Promise<ComponentNode> {
  *
  * Callers should createInstance() directly from the returned componentIds
  * rather than re-searching the file by name on every screen.
+ *
+ * Self-healing: an existing status bar is re-validated against
+ * `assertChildrenWithinBounds` (not just found-by-name and trusted) every
+ * call. A file that already has a BROKEN status bar from before this bounds
+ * check existed — e.g. one whose Glyphs frame silently kept Figma's
+ * factory-default 100x100 size — gets it repopulated in place (same
+ * component id, so every existing instance across every screen in the file
+ * updates automatically) instead of that defect being permanent for the
+ * life of the file.
  */
 export async function seedIosKit(): Promise<SeedResult> {
   const page = getOrCreateIosKitPage();
 
   const created: string[] = [];
   const alreadyPresent: string[] = [];
+  const healed: string[] = [];
 
   let statusBar = await findExistingComponent(STATUS_BAR_COMPONENT_NAME);
-  if (statusBar) {
+  if (statusBar && isHealthy(statusBar, { width: 390, height: 44, primaryAxisSizingMode: 'FIXED' })) {
     alreadyPresent.push(STATUS_BAR_COMPONENT_NAME);
+  } else if (statusBar) {
+    clearChildren(statusBar);
+    await populateStatusBarComponent(statusBar);
+    healed.push(STATUS_BAR_COMPONENT_NAME);
   } else {
     statusBar = await createStatusBarComponent(page);
     created.push(STATUS_BAR_COMPONENT_NAME);
   }
 
   let homeIndicator = await findExistingComponent(HOME_INDICATOR_COMPONENT_NAME);
-  if (homeIndicator) {
+  if (homeIndicator && isHealthy(homeIndicator)) {
     alreadyPresent.push(HOME_INDICATOR_COMPONENT_NAME);
+  } else if (homeIndicator) {
+    clearChildren(homeIndicator);
+    populateHomeIndicatorComponent(homeIndicator);
+    healed.push(HOME_INDICATOR_COMPONENT_NAME);
   } else {
     homeIndicator = createHomeIndicatorComponent(page);
     created.push(HOME_INDICATOR_COMPONENT_NAME);
   }
 
+  // The keyboard master is superseded by flaude.keyboard()'s bundled
+  // JSON reconstruction (real Apple keyboard, not this simplified
+  // placeholder) — only re-validated here, never rebuilt from this
+  // simplified builder, so a stale/broken one doesn't block seeding the
+  // other two assets.
   let keyboard = await findExistingComponent(KEYBOARD_COMPONENT_NAME);
   if (keyboard) {
     alreadyPresent.push(KEYBOARD_COMPONENT_NAME);
@@ -238,6 +398,7 @@ export async function seedIosKit(): Promise<SeedResult> {
   return {
     created,
     alreadyPresent,
+    healed,
     componentIds: {
       statusBar: statusBar.id,
       homeIndicator: homeIndicator.id,

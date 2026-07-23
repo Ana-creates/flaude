@@ -52,6 +52,85 @@ function within(actual: number, target: number, tolerance: number): boolean {
   return Math.abs(actual - target) <= tolerance;
 }
 
+/** One sRGB channel (0-1) to linear light, per WCAG relative-luminance. */
+function channelToLinear(c: number): number {
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance(rgb: RGB): number {
+  return (
+    0.2126 * channelToLinear(rgb.r) +
+    0.7152 * channelToLinear(rgb.g) +
+    0.0722 * channelToLinear(rgb.b)
+  );
+}
+
+/** WCAG contrast ratio between two colors: 1 (identical) .. 21 (black/white). */
+function contrastRatio(a: RGB, b: RGB): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const lighter = Math.max(la, lb);
+  const darker = Math.min(la, lb);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** First opaque SOLID fill color of a node, or null (image/gradient/mixed/
+ * fully-transparent fills give no determinable flat color). */
+function firstSolidFill(node: SceneNode): RGB | null {
+  if (!('fills' in node)) return null;
+  const fills = node.fills;
+  if (fills === figma.mixed || !Array.isArray(fills)) return null;
+  for (const fill of fills) {
+    if (fill.type === 'SOLID' && (fill.opacity === undefined || fill.opacity > 0.1) && fill.visible !== false) {
+      return fill.color;
+    }
+  }
+  return null;
+}
+
+/** The solid color visually BEHIND `text`: the nearest earlier-rendered sibling
+ * shape it sits ≥90% inside, else the first ancestor with a solid fill. Returns
+ * null when the background can't be determined as a flat color (e.g. it's an
+ * image or gradient) — in which case contrast can't be judged and is skipped. */
+function backgroundColorBehind(text: SceneNode): RGB | null {
+  const parent = text.parent;
+  if (parent && 'children' in parent) {
+    const siblings = parent.children;
+    const textIndex = siblings.indexOf(text as never);
+    const tArea = text.width * text.height;
+    if (tArea > 0) {
+      for (let i = textIndex - 1; i >= 0; i--) {
+        const s = siblings[i];
+        if (s.type !== 'RECTANGLE' && s.type !== 'FRAME' && s.type !== 'ELLIPSE') continue;
+        const ix = Math.max(text.x, s.x);
+        const iy = Math.max(text.y, s.y);
+        const ix2 = Math.min(text.x + text.width, s.x + s.width);
+        const iy2 = Math.min(text.y + text.height, s.y + s.height);
+        const overlap = Math.max(0, ix2 - ix) * Math.max(0, iy2 - iy);
+        if (overlap / tArea >= 0.9) {
+          const c = firstSolidFill(s);
+          if (c) return c;
+        }
+      }
+    }
+  }
+  let ancestor: BaseNode | null = parent;
+  let hops = 0;
+  while (ancestor && hops < 6) {
+    if ('fills' in ancestor) {
+      const c = firstSolidFill(ancestor as SceneNode);
+      if (c) return c;
+    }
+    ancestor = 'parent' in ancestor ? ancestor.parent : null;
+    hops++;
+  }
+  return null;
+}
+
+function verticalCenter(node: SceneNode): number {
+  return node.y + node.height / 2;
+}
+
 /** True if `node` itself, or any ancestor up to the page, is an INSTANCE —
  * i.e. this node is legitimately part of a real component's internals,
  * not something appended directly to a screen by hand. */
@@ -96,9 +175,15 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       const h = sceneNode.height;
 
       // 1. Hand-drawn icon: icon-sized raw vector art, not part of any
-      //    component instance. Doesn't require knowing the exact core-icon
-      //    catalog — any standalone icon-sized shape appended directly to a
-      //    screen is worth a second look before shipping it.
+      //    component instance. STRICT (not merely advisory), because the
+      //    agreed model is: the 54 premade core concepts are ALWAYS reused
+      //    from the library, and any concept we DON'T have is crafted AND
+      //    seeded as a component so it's reused next time too. So a loose
+      //    icon-sized vector that never became a component instance is always
+      //    a defect — it's either a redraw of a premade icon (wrong: use
+      //    flaude.icon) or a bespoke icon that wasn't seeded (wrong: seed it
+      //    via flaude.icon(concept, { svg, name }) so it's a reusable
+      //    component). Either way the fix is the same: it must be an instance.
       if (
         (node.type === 'VECTOR' || node.type === 'GROUP' || node.type === 'BOOLEAN_OPERATION') &&
         w >= ICON_MIN && w <= ICON_MAX && h >= ICON_MIN && h <= ICON_MAX &&
@@ -108,7 +193,7 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           rule: 'hand-drawn-icon',
           nodeId: sceneNode.id,
           nodeName: sceneNode.name,
-          message: `Icon-sized ${node.type.toLowerCase()} "${sceneNode.name}" (${Math.round(w)}x${Math.round(h)}) is not part of a component instance — verify it isn't a hand-drawn substitute for a real icon (call get_core_icons / check the icon library before hand-drawing).`,
+          message: `Icon-sized ${node.type.toLowerCase()} "${sceneNode.name}" (${Math.round(w)}x${Math.round(h)}) is loose vector art, not a component instance. Reuse a premade concept via flaude.icon(concept) — call get_core_icons to see the premade set; never redraw one. If it's a genuinely new concept, still seed it as a component via flaude.icon(concept, { svg, name }) so it's reusable — don't leave a hand-drawn one-off loose on the screen.`,
         });
       }
 
@@ -239,6 +324,80 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
                 message: `"${label.name}" sits on top of sibling "${shape.name}" but they are only independent siblings, not grouped/parented together — wrap this background+label (or +icon) pair in its own FRAME, or make it a proper COMPONENT, so it can be selected, moved, and reused as ONE unit instead of two elements that only line up via matching x/y coordinates.`,
               });
               break;
+            }
+          }
+        }
+      }
+
+      // 7. Effectively-invisible text: a TEXT node whose fill has near-zero
+      //    contrast against the solid shape directly behind it (e.g. a dark
+      //    initial on a near-black avatar — the "Connie R" defect). This is
+      //    reference-free: unreadable on its own terms, no reference image
+      //    needed to know it's wrong. Only solid-on-solid is judged;
+      //    image/gradient/mixed backgrounds are skipped since a flat contrast
+      //    ratio can't be computed there.
+      if (node.type === 'TEXT' && !isInsideInstance(node)) {
+        const textColor = firstSolidFill(sceneNode);
+        if (textColor) {
+          const bg = backgroundColorBehind(sceneNode);
+          if (bg) {
+            const ratio = contrastRatio(textColor, bg);
+            if (ratio < 1.6) {
+              findings.push({
+                rule: 'low-contrast-text',
+                nodeId: sceneNode.id,
+                nodeName: sceneNode.name,
+                message: `Text "${sceneNode.name}" has a contrast ratio of ${ratio.toFixed(2)}:1 against the shape directly behind it — that's effectively invisible (WCAG wants >=4.5:1 for body text; below ~1.6:1 can't be read at all). Change the text fill or the background color so it's actually visible.`,
+              });
+            }
+          }
+        }
+      }
+
+      // 8. Row cross-axis misalignment: an icon-like item and an adjacent,
+      //    similar-height item that share a horizontal band but whose
+      //    vertical CENTERS don't line up — the "leading icon / label /
+      //    trailing chevron aren't centered to each other" defect that
+      //    recurs when each element's y is hand-typed instead of centered on
+      //    its neighbor (see center_on_sibling). Reference-free. Scoped tight
+      //    to keep noise near zero: pairwise, both items small, heights
+      //    within 1.6x (so a leading avatar legitimately centered on a
+      //    two-line name+subtitle block is NOT compared against one line),
+      //    side by side, and at least one item is icon-like. Flags at most
+      //    once per container.
+      if ('children' in node && node.children.length >= 2 && !isScreenRootSized && !isInsideInstance(node)) {
+        const ROW_ITEM_MAX_H = 40;
+        const CENTER_TOL = 8;
+        const isIconLike = (c: SceneNode): boolean =>
+          c.type === 'VECTOR' || c.type === 'INSTANCE' || c.type === 'GROUP' ||
+          c.type === 'BOOLEAN_OPERATION';
+        const kids = node.children.filter(
+          (c): c is SceneNode =>
+            'width' in c && 'height' in c && c.visible !== false &&
+            c.height > 0 && c.height <= ROW_ITEM_MAX_H && c.width > 0
+        );
+        let flagged = false;
+        for (let i = 0; i < kids.length && !flagged; i++) {
+          for (let j = i + 1; j < kids.length && !flagged; j++) {
+            const a = kids[i];
+            const b = kids[j];
+            if (!isIconLike(a) && !isIconLike(b)) continue;
+            const hi = Math.max(a.height, b.height);
+            const lo = Math.min(a.height, b.height);
+            if (hi / lo > 1.6) continue; // not comparable-height — skip
+            const hDisjoint = a.x + a.width <= b.x + 0.5 || b.x + b.width <= a.x + 0.5;
+            if (!hDisjoint) continue; // stacked, not side by side
+            const vOverlap = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+            if (vOverlap < lo * 0.6) continue; // not on the same row band
+            const spread = Math.abs(verticalCenter(a) - verticalCenter(b));
+            if (spread > CENTER_TOL) {
+              flagged = true;
+              findings.push({
+                rule: 'row-cross-axis-misalignment',
+                nodeId: a.id,
+                nodeName: node.name,
+                message: `Row items "${a.name}" and "${b.name}" in "${node.name}" are side by side but their vertical centers differ by ${Math.round(spread)}px — they're not centered to each other. Use center_on_sibling so a row's icon/label/chevron share one vertical center instead of hand-typing each y.`,
+              });
             }
           }
         }

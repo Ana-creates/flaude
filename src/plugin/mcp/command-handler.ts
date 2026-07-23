@@ -39,8 +39,13 @@ import {
 } from '../tools/edit-tools';
 import { seedIosKit } from '../tools/ios-kit-seed';
 import { runStructuralLint } from '../tools/structural-lint';
-import { flaudeHelpers } from '../tools/flaude-helpers';
-import { recordScreenshot, checkReferenceCaptured } from '../tools/reference-tracking';
+import { flaudeHelpers, drainFailedIconLookups } from '../tools/flaude-helpers';
+import {
+  recordScreenshot,
+  checkReferenceCaptured,
+  checkPixelDiffMissing,
+  recordComparisonMarker,
+} from '../tools/reference-tracking';
 
 type CommandHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -315,8 +320,21 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
       const fn = new Function('figma', 'flaude', `return (async () => { ${code} })()`);
       result = await fn(figma, flaudeHelpers);
     } catch (err) {
+      // If flaude.* recorded a failed lookup on the way to this uncaught
+      // throw, drain (don't leave it queued) — the raw error message below
+      // already surfaces it maximally directly; leaving it queued would
+      // misattribute it to whatever the NEXT successful call happens to be.
+      drainFailedIconLookups();
       throw new Error(`execute failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    // Failed flaude.icon() lookups are drained (and reported) UNCONDITIONALLY
+    // — even if the agent's own code wrapped the call in try/catch and kept
+    // going. This is deliberately NOT gated behind isPlainObject/lint.length:
+    // an icon that silently failed to place is a real defect that already
+    // happened, not an advisory heuristic, and must survive regardless of
+    // what shape the call happens to return.
+    const failedIconLookups = drainFailedIconLookups();
 
     // Only merge lint findings into plain-object results (e.g. `return { id }`)
     // so array/string/number returns from read-only inspection calls keep their
@@ -332,6 +350,10 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         if (page.id === beforePage.id) {
           lint.push(...checkReferenceCaptured(page, beforeIds));
         }
+        for (const failure of failedIconLookups) {
+          lint.push({ rule: 'swallowed-icon-lookup-failure', ...failure });
+        }
+        lint.push(...checkPixelDiffMissing(page));
         if (lint.length > 0) {
           return { ...(result as Record<string, unknown>), _lint: lint };
         }
@@ -360,6 +382,13 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
       throw new Error('No node to screenshot: pass nodeId or select a node in Figma');
     }
     recordScreenshot(node);
+    // Set only by compare_to_reference (never by a plain figma_screenshot
+    // call) — records that a real pixel diff happened for this (ref, built)
+    // pair, so checkPixelDiffMissing can tell "looked at it" apart from
+    // "actually diffed it".
+    if (typeof params.comparePairKey === 'string') {
+      recordComparisonMarker(params.comparePairKey);
+    }
     const bytes = await node.exportAsync({
       format: 'PNG',
       constraint: { type: 'SCALE', value: scale },
