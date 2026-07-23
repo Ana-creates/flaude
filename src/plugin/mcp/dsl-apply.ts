@@ -473,8 +473,9 @@ function positionChrome(frame: FrameNode) {
   const specs: Array<[string, (n: SceneNode) => void]> = [
     ["chrome-status-bar", (n) => { n.x = 0; n.y = 0; }],
     // Home indicator sits FLUSH at the bottom edge. The 34px component already
-    // bakes in the safe-area gap (the black pill is centered inside it), so an
-    // extra bottom offset would double-count and leave a visible gap below.
+    // bakes in the safe-area gap (the black pill is bottom-anchored ~8px from
+    // the component's own bottom), so an extra frame offset would double-count
+    // and leave a visible gap below.
     ["chrome-home-indicator", (n) => { n.x = (frame.width - n.width) / 2; n.y = frame.height - n.height; }],
   ];
   for (const [dslId, place] of specs) {
