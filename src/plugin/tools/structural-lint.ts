@@ -599,6 +599,58 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           }
         }
       }
+
+      // 12. Crop band duplicates reconstructed chrome: a reference-crop image
+      //     node (tagged flaude:refCrop) whose bounds contain a RECONSTRUCTED
+      //     chrome node (status bar / home indicator instance, or a close 'X')
+      //     — the crop almost certainly already shows that chrome, so the
+      //     reconstructed one is a DUPLICATE (observed: double 9:41 status bar
+      //     when a header band was cropped AND a status-bar instance overlaid;
+      //     double X when a top illustration band was cropped AND an X rebuilt).
+      //     Graduated from the flywheel (ruleClass
+      //     'crop-band-duplicates-reconstructed-chrome'). Fix: either crop below
+      //     the chrome, or drop the reconstructed chrome and keep the crop's.
+      if (node.type === 'FRAME') {
+        const frame = node as FrameNode;
+        const crops = frame.findAll(
+          (n) => n.getPluginData('flaude:refCrop') === 'true' && !!(n as SceneNode).absoluteBoundingBox
+        ) as SceneNode[];
+        if (crops.length) {
+          const isReconstructedChrome = (n: SceneNode): boolean => {
+            if (n.getPluginData('flaude:refCrop') === 'true') return false; // it's part of a crop, not reconstructed
+            const name = n.name.toLowerCase();
+            if (/status.?bar|home.?indicator/.test(name)) return true;
+            if (n.type === 'TEXT') {
+              const ch = (n as TextNode).characters.trim();
+              // a lone close glyph or the 9:41 clock
+              if (ch === '\u2715' || ch === '\u2716' || ch === '\u00d7' || ch === 'x' || /^9:41$/.test(ch)) return true;
+            }
+            return false;
+          };
+          const chromeNodes = frame.findAll(
+            (n) => isReconstructedChrome(n as SceneNode) && !!(n as SceneNode).absoluteBoundingBox
+          ) as SceneNode[];
+          for (const chrome of chromeNodes) {
+            const cb = chrome.absoluteBoundingBox!;
+            for (const crop of crops) {
+              const kb = crop.absoluteBoundingBox!;
+              const ix = Math.max(0, Math.min(cb.x + cb.width, kb.x + kb.width) - Math.max(cb.x, kb.x));
+              const iy = Math.max(0, Math.min(cb.y + cb.height, kb.y + kb.height) - Math.max(cb.y, kb.y));
+              const overlap = ix * iy;
+              const chromeArea = cb.width * cb.height || 1;
+              if (overlap / chromeArea >= 0.6) {
+                findings.push({
+                  rule: 'crop-band-duplicates-reconstructed-chrome',
+                  nodeId: chrome.id,
+                  nodeName: chrome.name,
+                  message: `Reconstructed chrome "${chrome.name}" sits inside reference-crop "${crop.name}" (${Math.round((overlap / chromeArea) * 100)}% overlap). The crop almost certainly already shows this element, so you now have a DUPLICATE (e.g. two status bars / two close buttons). Fix: either crop the reference BELOW this chrome, or delete the reconstructed node and let the crop provide it.`,
+                });
+                break;
+              }
+            }
+          }
+        }
+      }
     }
 
     if ('children' in node) {
