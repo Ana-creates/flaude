@@ -440,32 +440,89 @@ export interface FlaudeRowOptions {
   timeColor?: RGB;
 }
 
+// ── iOS FONT RESOLUTION ───────────────────────────────────────────
+// The iOS system font family + its weight NAMES vary by environment, which
+// silently broke builds: "SF Pro" carries the full weight set
+// (Regular/Medium/Semibold/Bold); "SF Pro Display" only Bold/Light/Regular;
+// "SF Pro Text" may be empty. The old code assumed "SF Pro Display" + a
+// "Semibold" weight and threw "Cannot use unloaded font" when that weight was
+// absent. This resolves against what's ACTUALLY installed: pick the first
+// candidate family that has real styles, load them, and map any requested
+// weight to the nearest available style. Result is env-proof; worst case falls
+// back to Inter.
+
+export interface ResolvedIosFont {
+  family: string;
+  /** Map a canonical weight (Regular|Medium|Semibold|Bold) to an available
+   * style name in the chosen family (nearest if the exact weight is absent). */
+  weight: (w: string) => string;
+}
+
+// Cache so repeated flaude.row / flaude.font calls don't re-query fonts.
+let _iosFontCache: ResolvedIosFont | null = null;
+
+export async function resolveIosFont(preferred?: string): Promise<ResolvedIosFont> {
+  if (!preferred && _iosFontCache) return _iosFontCache;
+  const all = await figma.listAvailableFontsAsync();
+  const stylesOf = (family: string) =>
+    all.filter((f) => f.fontName.family === family).map((f) => f.fontName.style);
+
+  const candidates = [preferred, 'SF Pro', 'SF Pro Text', 'SF Pro Display', 'Inter', 'Roboto']
+    .filter((c): c is string => !!c);
+  let family = 'Inter';
+  let styles: string[] = [];
+  for (const cand of candidates) {
+    const s = stylesOf(cand);
+    if (s.length > 0) { family = cand; styles = s; break; }
+  }
+  if (styles.length === 0) styles = stylesOf('Inter');
+
+  // Preferred style name per canonical weight, in descending preference. First
+  // one present in `styles` wins; else fall back to Regular, else the first
+  // available style. Handles "Semibold" vs "Semi Bold" and missing mid-weights.
+  const prefs: Record<string, string[]> = {
+    Regular: ['Regular', 'Medium', 'Book'],
+    Medium: ['Medium', 'Semibold', 'Semi Bold', 'Regular'],
+    Semibold: ['Semibold', 'Semi Bold', 'Bold', 'Medium', 'Regular'],
+    Bold: ['Bold', 'Heavy', 'Black', 'Semibold', 'Semi Bold'],
+  };
+  const has = (s: string) => styles.includes(s);
+  const weight = (w: string): string => {
+    const chain = prefs[w] ?? [w, 'Regular'];
+    for (const s of chain) if (has(s)) return s;
+    if (has('Regular')) return 'Regular';
+    return styles[0] ?? 'Regular';
+  };
+
+  // Preload the four canonical weights we resolve to (dedup).
+  const toLoad = new Set(['Regular', 'Medium', 'Semibold', 'Bold'].map(weight));
+  for (const st of toLoad) {
+    try { await figma.loadFontAsync({ family, style: st }); } catch { /* skip */ }
+  }
+  const resolved: ResolvedIosFont = { family, weight };
+  if (!preferred) _iosFontCache = resolved;
+  return resolved;
+}
+
 /** Build one list row as HORIZONTAL auto-layout with a growing text column, so
  * the timestamp is pushed to the true right edge by layout math (not a typed x)
  * and handles/badges come only from explicit per-row data. */
 export async function flaudeListRow(opts: FlaudeRowOptions): Promise<FrameNode> {
-  // Default to the real iOS system font. Building iOS screens in Inter (the old
-  // default) left a permanent ~5–6% pixel-diff floor vs SF Pro references and
-  // made native chrome read subtly "off" — an error on every screen. SF Pro
-  // Display is available in this environment; fall back to Inter if not.
-  let fam = opts.fontFamily ?? 'SF Pro Display';
-  const loadFam = async (family: string) => {
-    let okAny = false;
-    for (const st of ['Regular', 'Medium', 'Semibold', 'Bold']) {
-      try { await figma.loadFontAsync({ family, style: st }); okAny = true; } catch { /* skip missing weight */ }
-    }
-    return okAny;
-  };
-  if (!(await loadFam(fam))) { fam = 'Inter'; await loadFam(fam); }
-  // SF Pro uses "Semibold" (one word); Inter uses "Semi Bold". Normalize below.
-  const semibold = fam === 'Inter' ? 'Semi Bold' : 'Semibold';
+  // Resolve the real iOS system font ROBUSTLY (see resolveIosFont): the family
+  // and weight names vary by environment ("SF Pro" carries the full weight set;
+  // "SF Pro Display" only Bold/Light/Regular; the old code assumed Semibold
+  // existed and threw). This queries what's actually installed and maps each
+  // requested weight to the nearest available style, falling back to Inter.
+  const font = await resolveIosFont(opts.fontFamily);
+  const fam = font.family;
+  const semibold = font.weight('Semibold');
   // `fill=true` makes the text stretch to its column and TRUNCATE with an
   // ellipsis instead of pushing the column wider than the row (which is what
   // clipped titles like "John, Wa"). Titles/subtitles in a growing column must
   // fill; a hugging label (time, badge) must not.
   const mk = (s: string, style: string, size: number, color: RGB, fill = false): TextNode => {
     const t = figma.createText();
-    const st = style === 'Semi Bold' ? semibold : style;
+    const st = style === 'Semi Bold' || style === 'Semibold' ? semibold : font.weight(style);
     t.fontName = { family: fam, style: st };
     t.fontSize = size;
     t.characters = s;
@@ -642,6 +699,7 @@ export const flaudeHelpers = {
   logo: flaudeLogo,
   crop: flaudeCropFromReference,
   row: flaudeListRow,
+  font: resolveIosFont,
   statusBar: flaudeStatusBar,
   homeIndicator: flaudeHomeIndicator,
   keyboard: flaudeKeyboard,
