@@ -27,7 +27,10 @@ export function App() {
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
   const [mcpStatus, setMcpStatus] = useState<MCPStatus>('disconnected');
   const [isCollapsed, setIsCollapsed] = useState(false);
-  // Copy-from-web -> insert: in-flight flag + a transient success banner.
+  // Copy-from-web -> insert: paste box open flag, in-flight flag, success banner.
+  // Figma's sandbox blocks reading the clipboard, so instead of auto-reading we
+  // pop a small input and let the user paste (⌘V) — a manual paste IS allowed.
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [inserting, setInserting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -84,16 +87,17 @@ export function App() {
     emit('RESIZE_UI', { width: UI_DIMENSIONS.width, height: UI_DIMENSIONS.height });
   }, []);
 
-  // Insert a screen the user copied on flaude.app: read the clipboard payload,
-  // fetch its DSL doc, and rebuild real editable layers via `insert_screen`.
-  // Every failure point throws a toast-ready message (handoff.ts), so we just
-  // surface it in the existing error banner; success shows a green notice.
-  const handleInsertFromWeb = useCallback(async () => {
+  // Insert a screen the user copied on flaude.app. `pasted` is the text from the
+  // user's ⌘V (Figma won't let us read the clipboard ourselves). We feed it into
+  // the same fetch->rebuild pipeline; handoff.ts throws a toast-ready message at
+  // every failure point, so we just surface it in the existing error banner.
+  const runInsert = useCallback(async (pasted: string) => {
     setError(null);
     setNotice(null);
+    setPasteOpen(false);
     setInserting(true);
     try {
-      const result = await insertCopiedScreen();
+      const result = await insertCopiedScreen(async () => pasted);
       const n = result.nodeIds.length;
       if (result.ok) {
         setNotice(`Inserted ${n} editable layer${n === 1 ? '' : 's'} — see your canvas`);
@@ -285,7 +289,7 @@ export function App() {
               </button>
             )}
             <button
-              onClick={handleInsertFromWeb}
+              onClick={() => { setError(null); setNotice(null); setPasteOpen((v) => !v); }}
               disabled={inserting}
               style={{
                 display: 'flex',
@@ -295,13 +299,13 @@ export function App() {
                 height: '32px',
                 border: 'none',
                 borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--figma-color-bg-secondary)',
-                color: 'var(--figma-color-text-secondary)',
+                backgroundColor: pasteOpen ? 'rgba(249, 115, 22, 0.12)' : 'var(--figma-color-bg-secondary)',
+                color: pasteOpen ? '#f97316' : 'var(--figma-color-text-secondary)',
                 cursor: inserting ? 'wait' : 'pointer',
                 opacity: inserting ? 0.5 : 1,
                 transition: 'all 0.2s ease',
               }}
-              title={inserting ? 'Inserting…' : 'Insert a screen you copied on flaude.app'}
+              title={inserting ? 'Inserting…' : 'Paste a screen you copied on flaude.app'}
             >
               {inserting ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 0.8s linear infinite' }}>
@@ -387,6 +391,40 @@ export function App() {
             <path d="M20 6 9 17l-5-5" />
           </svg>
           {notice}
+        </div>
+      )}
+
+      {/* Paste box (copy -> insert). Figma blocks reading the clipboard, so we
+          let the user paste (⌘V) into this input; onPaste feeds the pipeline. */}
+      {pasteOpen && !inserting && (
+        <div
+          className="fade-in"
+          style={{ margin: '0 16px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}
+        >
+          <input
+            type="text"
+            autoFocus
+            placeholder="Paste your copied screen here (⌘V)"
+            onPaste={(e) => {
+              const text = e.clipboardData?.getData('text') ?? '';
+              if (text) { e.preventDefault(); runInsert(text); }
+            }}
+            onKeyDown={(e) => { if (e.key === 'Escape') setPasteOpen(false); }}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '12px 14px',
+              fontSize: '12px',
+              border: '1px solid var(--card-border)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--figma-color-bg)',
+              color: 'var(--figma-color-text)',
+              outline: 'none',
+            }}
+          />
+          <span style={{ fontSize: '11px', color: 'var(--figma-color-text-tertiary)' }}>
+            Hit “Copy to Figma” on a screen at flaude.app, then paste here.
+          </span>
         </div>
       )}
 
