@@ -283,7 +283,7 @@ function hasImageFill(node: SceneNode): boolean {
  */
 function adjacentSides(
   node: SceneNode,
-  opts: { imageOnly?: boolean } = {}
+  opts: { imageOnly?: boolean; sizeRatioMax?: number; selfArea?: number } = {}
 ): { above: boolean; below: boolean; left: boolean; right: boolean } {
   const out = { above: false, below: false, left: false, right: false };
   const parent = node.parent;
@@ -294,6 +294,17 @@ function adjacentSides(
   for (const s of parent.children as readonly SceneNode[]) {
     if (s === node || !('width' in s)) continue;
     if (opts.imageOnly && !hasImageFill(s)) continue;
+    // Optional size-similarity filter: a real tile neighbour is comparably
+    // sized. Skips a small floating control sitting near a big hero element
+    // (e.g. action buttons under a full-bleed card photo) being mistaken for a
+    // tile in a grid.
+    if (opts.sizeRatioMax && opts.selfArea) {
+      const sArea = s.width * s.height;
+      if (sArea > 0) {
+        const ratio = Math.max(sArea / opts.selfArea, opts.selfArea / sArea);
+        if (ratio > opts.sizeRatioMax) continue;
+      }
+    }
     const sx1 = s.x, sy1 = s.y, sx2 = s.x + s.width, sy2 = s.y + s.height;
     const hOverlap = Math.min(nx2, sx2) - Math.max(nx1, sx1);
     const vOverlap = Math.min(ny2, sy2) - Math.max(ny1, sy1);
@@ -577,7 +588,17 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         const bl = rect.bottomLeftRadius, br = rect.bottomRightRadius;
         const maxR = Math.max(tl, tr, bl, br);
         if (maxR >= 6 && w >= 20 && h >= 20) {
-          const adj = adjacentSides(sceneNode);
+          // Only siblings of COMPARABLE size count as neighbouring tiles. A real
+          // tiled composite (photo grid, stacked thumbnails, segmented cells)
+          // has similar-size cells; a big full-bleed hero photo with small
+          // floating buttons 8px below it is NOT a composite (false-positive:
+          // Tinder card photo "touching" the action-button circles). Require
+          // the adjacent tile's area to be within 4x of this one.
+          const areaSelf = w * h;
+          const adj = adjacentSides(sceneNode, {
+            sizeRatioMax: 4,
+            selfArea: areaSelf,
+          });
           const fixes: string[] = [];
           if ((adj.above || adj.left) && tl > 0.5) fixes.push('topLeftRadius');
           if ((adj.above || adj.right) && tr > 0.5) fixes.push('topRightRadius');
