@@ -6,6 +6,7 @@ import { SettingsView } from './components/features/SettingsView';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { saveUserEmail, checkProSubscription } from './api/supabase';
+import { insertCopiedScreen } from './api/handoff';
 import { mcpClient } from './mcp/websocket-client';
 import type { ChatMessage, SelectionContext, Settings, License } from '../shared/types';
 import './styles/globals.css';
@@ -26,6 +27,9 @@ export function App() {
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
   const [mcpStatus, setMcpStatus] = useState<MCPStatus>('disconnected');
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // Copy-from-web -> insert: in-flight flag + a transient success banner.
+  const [inserting, setInserting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
 
   // Setup event listeners for plugin communication
@@ -78,6 +82,32 @@ export function App() {
   const handleExpand = useCallback(() => {
     setIsCollapsed(false);
     emit('RESIZE_UI', { width: UI_DIMENSIONS.width, height: UI_DIMENSIONS.height });
+  }, []);
+
+  // Insert a screen the user copied on flaude.app: read the clipboard payload,
+  // fetch its DSL doc, and rebuild real editable layers via `insert_screen`.
+  // Every failure point throws a toast-ready message (handoff.ts), so we just
+  // surface it in the existing error banner; success shows a green notice.
+  const handleInsertFromWeb = useCallback(async () => {
+    setError(null);
+    setNotice(null);
+    setInserting(true);
+    try {
+      const result = await insertCopiedScreen();
+      const n = result.nodeIds.length;
+      if (result.ok) {
+        setNotice(`Inserted ${n} editable layer${n === 1 ? '' : 's'} — see your canvas`);
+      } else {
+        const e = result.errors.length;
+        setNotice(`Inserted with ${e} issue${e === 1 ? '' : 's'} — check the new frame`);
+      }
+      setTimeout(() => setNotice(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not insert the copied screen.');
+      setTimeout(() => setError(null), 6000);
+    } finally {
+      setInserting(false);
+    }
   }, []);
 
   // Save email to Supabase for community tracking
@@ -255,6 +285,38 @@ export function App() {
               </button>
             )}
             <button
+              onClick={handleInsertFromWeb}
+              disabled={inserting}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '32px',
+                height: '32px',
+                border: 'none',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--figma-color-bg-secondary)',
+                color: 'var(--figma-color-text-secondary)',
+                cursor: inserting ? 'wait' : 'pointer',
+                opacity: inserting ? 0.5 : 1,
+                transition: 'all 0.2s ease',
+              }}
+              title={inserting ? 'Inserting…' : 'Insert a screen you copied on flaude.app'}
+            >
+              {inserting ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 0.8s linear infinite' }}>
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="8" y="2" width="8" height="4" rx="1" />
+                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                  <path d="M12 11v6" />
+                  <path d="M9 14l3 3 3-3" />
+                </svg>
+              )}
+            </button>
+            <button
               onClick={() => setView('settings')}
               style={{
                 display: 'flex',
@@ -305,6 +367,28 @@ export function App() {
         </div>
       )}
 
+      {/* Success / notice banner (copy -> insert) */}
+      {notice && (
+        <div
+          className="fade-in"
+          style={{
+            margin: '0 16px 12px',
+            padding: '12px 16px',
+            fontSize: '12px',
+            backgroundColor: 'rgba(34, 197, 94, 0.1)',
+            color: '#16a34a',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          {notice}
+        </div>
+      )}
 
       {/* Main Content */}
       <div style={{ flex: 1, overflow: 'hidden' }}>

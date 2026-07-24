@@ -19,6 +19,7 @@ declare const styles: {
   readonly "shimmer-text": string;
   readonly "slide-up": string;
   readonly "slideUp": string;
+  readonly "spin": string;
   readonly "text-danger": string;
   readonly "text-muted": string;
   readonly "text-success": string;
