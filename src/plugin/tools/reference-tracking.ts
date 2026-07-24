@@ -50,6 +50,27 @@ export function recordComparisonMarker(pairKey: string): void {
   comparedPairKeys.add(pairKey);
 }
 
+// Root cause (this session): 20 app screens were built and called "done"
+// while ~80% were placeholder-fidelity — flat gradient tiles where the
+// reference showed real imagery (Pinterest board collages), solid-color
+// circles where it showed profile photos, wrong brand colors. The pixel-diff
+// gate exists but a VISUAL review — the only thing that catches "this doesn't
+// look like the app" — was never mechanically required: running the reviewer
+// was an optional agent call, so under "build 10, don't stop" pressure it was
+// skipped for every screen. This set mirrors comparedPairKeys: a review PASS
+// is recorded per (ref, built) pair only when the review→fix loop has actually
+// run and resolved (or accepted) the screen — never by merely screenshotting.
+const reviewedPairKeys = new Set<string>();
+
+/** Record that the review→fix loop completed for this (ref, built) pair.
+ * Set ONLY by the `record_review_pass` command (which the review orchestration
+ * calls after the reviewer ran and its fixes were applied / it returned
+ * MATCH) — never by a plain screenshot. This is what clears the
+ * `built-without-review` gate for a screen. */
+export function recordReviewMarker(pairKey: string): void {
+  reviewedPairKeys.add(pairKey);
+}
+
 export interface ReferenceCaptureFinding {
   rule: 'built-without-reference-capture';
   builtNodeId: string;
@@ -159,6 +180,64 @@ export function checkPixelDiffMissing(page: PageNode): PixelDiffMissingFinding[]
       refNodeId: ref.id,
       refNodeName: ref.name,
       message: `\u26a0\ufe0f NEVER PIXEL-DIFFED \u2014 "${child.name}" exists alongside "${ref.name}" but compare_to_reference has never been called for this pair this session. Eyeballing two screenshots misses shape/color/geometry drift (e.g. a circular button where the reference shows a rounded rectangle) that a real pixel diff catches immediately \u2014 call compare_to_reference({ refNodeId: "${ref.id}", builtNodeId: "${child.id}" }) before considering this screen done.`,
+    });
+  }
+
+  return findings;
+}
+
+export interface ReviewMissingFinding {
+  rule: 'built-without-review';
+  builtNodeId: string;
+  builtNodeName: string;
+  refNodeId: string;
+  refNodeName: string;
+  message: string;
+}
+
+/**
+ * Mirror of checkPixelDiffMissing for the VISUAL review gate. Scan every
+ * `<AppName> / <ScreenName>` frame whose matching `REF / <ScreenName>` sibling
+ * exists but which has NOT been through a recorded review pass this session
+ * (recordReviewMarker, set only by `record_review_pass` after the review->fix
+ * loop ran). Pixel-diff catches geometry/color drift; the visual review is the
+ * only thing that catches "this doesn't look like the real app" -- placeholder
+ * imagery, flat tiles standing in for photo collages, wrong brand feel -- which
+ * a low pixel-diff can still miss. A built screen is NOT done while this fires.
+ */
+export function checkReviewMissing(page: PageNode): ReviewMissingFinding[] {
+  const findings: ReviewMissingFinding[] = [];
+
+  const refByScreenName = new Map<string, { id: string; name: string }>();
+  for (const child of page.children) {
+    if (child.name.startsWith('REF /')) {
+      const screenName = child.name.slice('REF /'.length).trim();
+      refByScreenName.set(screenName, { id: child.id, name: child.name });
+    }
+  }
+  if (refByScreenName.size === 0) return findings;
+
+  for (const child of page.children) {
+    if (child.type !== 'FRAME' && child.type !== 'COMPONENT') continue;
+    if (child.name.startsWith('REF /')) continue;
+
+    const separatorIndex = child.name.indexOf(' / ');
+    if (separatorIndex === -1) continue;
+    const screenName = child.name.slice(separatorIndex + 3).trim();
+
+    const ref = refByScreenName.get(screenName);
+    if (!ref) continue;
+
+    const pairKey = `${ref.id}::${child.id}`;
+    if (reviewedPairKeys.has(pairKey)) continue;
+
+    findings.push({
+      rule: 'built-without-review',
+      builtNodeId: child.id,
+      builtNodeName: child.name,
+      refNodeId: ref.id,
+      refNodeName: ref.name,
+      message: `\u26a0\ufe0f NEVER VISUALLY REVIEWED -- "${child.name}" exists alongside "${ref.name}" but the review->fix loop has never run for this pair this session. A low pixel-diff can still hide placeholder fidelity (flat tiles where the reference shows a real photo collage, solid circles for real avatars/logos, wrong brand feel). Run the visual reviewer against "${ref.name}", apply its fixes, then call record_review_pass({ refNodeId: "${ref.id}", builtNodeId: "${child.id}", verdict }) -- this screen is NOT done until that pass is recorded.`,
     });
   }
 

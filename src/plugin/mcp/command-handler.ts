@@ -45,6 +45,8 @@ import {
   checkReferenceCaptured,
   checkPixelDiffMissing,
   recordComparisonMarker,
+  checkReviewMissing,
+  recordReviewMarker,
 } from '../tools/reference-tracking';
 import {
   recordFindings,
@@ -95,6 +97,20 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // auto-lint: validation already happened server-side, and per-batch lint
   // noise defeats the purpose. Each batch is idempotent + acked.
   build_batch: (params) => applyBuildBatch(params as unknown as BuildBatch),
+
+  // REVIEW GATE. Clears the `built-without-review` lint for one (ref, built)
+  // pair. The review orchestration calls this ONLY after the visual reviewer
+  // has run and its fixes were applied (or it returned MATCH) — never on a bare
+  // screenshot — so the gate reflects an actual review→fix pass, not intent.
+  record_review_pass: (params) => {
+    const refNodeId = params.refNodeId as string;
+    const builtNodeId = params.builtNodeId as string;
+    if (!refNodeId || !builtNodeId) {
+      throw new Error('`refNodeId` and `builtNodeId` are both required');
+    }
+    recordReviewMarker(`${refNodeId}::${builtNodeId}`);
+    return { ok: true, verdict: (params.verdict as string) ?? null };
+  },
 
   // READ COMMANDS
   get_file_structure: () => getFileStructure(),
@@ -400,6 +416,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
           lint.push({ rule: 'swallowed-icon-lookup-failure', ...failure });
         }
         lint.push(...checkPixelDiffMissing(page));
+        lint.push(...checkReviewMissing(page));
         if (lint.length > 0) {
           // Persist to the durable error ledger (fire-and-forget) so recurring
           // defects can later be analyzed and turned into new checks — the
