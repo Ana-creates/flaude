@@ -231,6 +231,48 @@ function nearSquare(width: number, height: number): boolean {
   return ratio > 0.75 && ratio < 1.34;
 }
 
+function hasImageFill(node: SceneNode): boolean {
+  if (!('fills' in node)) return false;
+  const fills = (node as GeometryMixin).fills;
+  if (!Array.isArray(fills)) return false;
+  return fills.some((f) => f.type === 'IMAGE' && f.visible !== false);
+}
+
+/**
+ * Which sides of `node` have an adjacent sibling within a thin gutter (≤8px).
+ * Gutter-aware so a real tiled composite (photo grid, stacked board
+ * thumbnails, segmented cells) separated by a hairline gap still reads as
+ * "these belong together". Used both to detect a tile group (avatar rule
+ * exclusion) and to enforce composite corner geometry.
+ */
+function adjacentSides(
+  node: SceneNode,
+  opts: { imageOnly?: boolean } = {}
+): { above: boolean; below: boolean; left: boolean; right: boolean } {
+  const out = { above: false, below: false, left: false, right: false };
+  const parent = node.parent;
+  if (!parent || !('children' in parent)) return out;
+  const GUTTER = 8; // max gap that still counts as one composite
+  const OVERLAP_MIN = 8; // must share at least this much edge length
+  const nx1 = node.x, ny1 = node.y, nx2 = node.x + node.width, ny2 = node.y + node.height;
+  for (const s of parent.children as readonly SceneNode[]) {
+    if (s === node || !('width' in s)) continue;
+    if (opts.imageOnly && !hasImageFill(s)) continue;
+    const sx1 = s.x, sy1 = s.y, sx2 = s.x + s.width, sy2 = s.y + s.height;
+    const hOverlap = Math.min(nx2, sx2) - Math.max(nx1, sx1);
+    const vOverlap = Math.min(ny2, sy2) - Math.max(ny1, sy1);
+    if (hOverlap > OVERLAP_MIN) {
+      if (sy2 <= ny1 && ny1 - sy2 <= GUTTER) out.above = true;
+      if (sy1 >= ny2 && sy1 - ny2 <= GUTTER) out.below = true;
+    }
+    if (vOverlap > OVERLAP_MIN) {
+      if (sx2 <= nx1 && nx1 - sx2 <= GUTTER) out.left = true;
+      if (sx1 >= nx2 && sx1 - nx2 <= GUTTER) out.right = true;
+    }
+  }
+  return out;
+}
+
 /**
  * Walk `root` (bounded like validate.js: skip invisible nodes, cap depth and
  * fan-out so SVG imports/vector art don't blow up the scan) looking for
@@ -315,13 +357,20 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
 
       // 4. Avatar-sized flat placeholder on a screen with a real reference
       //    image available — the reference may show a real photo.
+      // A flat box that touches a real image tile (within a gutter) is part of
+      // a photo composite — e.g. the empty grey slots in a Pinterest board
+      // preview sit beside real pin photos. That's an intentional empty slot,
+      // not a missing avatar, so it must NOT trip the avatar-placeholder rule.
+      const adjImg = adjacentSides(sceneNode, { imageOnly: true });
+      const inPhotoComposite = adjImg.above || adjImg.below || adjImg.left || adjImg.right;
       if (
         pageHasRefFrames &&
         (node.type === 'ELLIPSE' || node.type === 'RECTANGLE' || node.type === 'FRAME') &&
         w >= AVATAR_MIN && w <= AVATAR_MAX && h >= AVATAR_MIN && h <= AVATAR_MAX &&
         nearSquare(w, h) &&
         hasFlatSolidFill(sceneNode) &&
-        !hasCenteredInitials(sceneNode)
+        !hasCenteredInitials(sceneNode) &&
+        !inPhotoComposite
       ) {
         findings.push({
           rule: 'avatar-placeholder',
@@ -329,6 +378,36 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           nodeName: sceneNode.name,
           message: `Avatar-sized "${sceneNode.name}" (${Math.round(w)}x${Math.round(h)}) has a single flat fill — confirm the REF frame actually shows a blank avatar here; if it shows a real photo/logo, use a real image fill instead of a placeholder color.`,
         });
+      }
+
+      // 4b. Composite-tile INNER corners must be square. A tiled composite
+      //     (photo grid, stacked board thumbnails, segmented cells) rounds
+      //     ONLY its outer boundary; a corner that faces a neighbouring tile
+      //     is square. Vision review can't reliably see a 4px corner, but the
+      //     geometry is exact — so this is a deterministic rule. For each
+      //     rounded corner whose meeting edges face an adjacent sibling (within
+      //     an 8px gutter), report the exact per-corner zeroing fix.
+      if (node.type === 'RECTANGLE') {
+        const rect = node as RectangleNode;
+        const tl = rect.topLeftRadius, tr = rect.topRightRadius;
+        const bl = rect.bottomLeftRadius, br = rect.bottomRightRadius;
+        const maxR = Math.max(tl, tr, bl, br);
+        if (maxR >= 6 && w >= 20 && h >= 20) {
+          const adj = adjacentSides(sceneNode);
+          const fixes: string[] = [];
+          if ((adj.above || adj.left) && tl > 0.5) fixes.push('topLeftRadius');
+          if ((adj.above || adj.right) && tr > 0.5) fixes.push('topRightRadius');
+          if ((adj.below || adj.left) && bl > 0.5) fixes.push('bottomLeftRadius');
+          if ((adj.below || adj.right) && br > 0.5) fixes.push('bottomRightRadius');
+          if (fixes.length) {
+            findings.push({
+              rule: 'composite-tile-inner-corner-rounded',
+              nodeId: sceneNode.id,
+              nodeName: sceneNode.name,
+              message: `Tile "${sceneNode.name}" sits in a tiled composite (touches a sibling within an 8px gutter) but still rounds INNER corner(s) that face a neighbour: ${fixes.join(', ')}. A composite rounds ONLY its outer boundary — seams between tiles are square. FIX: set ${fixes.map((k) => `${k}=0`).join('; ')} on "${sceneNode.name}" (keep the outer corners at their current radius).`,
+            });
+          }
+        }
       }
 
       // 5. Two-button "toggle track": an auto-layout wrapper with a visible
