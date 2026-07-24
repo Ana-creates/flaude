@@ -51,6 +51,11 @@
   },
   "check": {
     "concept": "check",
+    "name": "Outline / Essentional, UI / Check",
+    "svg": "<svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n<path d=\"M5 13L9 17L19 7\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n</svg>\n"
+  },
+  "check-circle": {
+    "concept": "check-circle",
     "name": "Outline / Essentional, UI / Check Circle",
     "svg": "<svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n<circle cx=\"12\" cy=\"12\" r=\"10\" stroke=\"black\" stroke-width=\"1.5\"/>\n<path d=\"M8.5 12.5L10.5 14.5L15.5 9.5\" stroke=\"black\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n</svg>\n"
   },
@@ -81,6 +86,11 @@
   },
   "close": {
     "concept": "close",
+    "name": "Outline / Essentional, UI / Close",
+    "svg": "<svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n<path d=\"M6 6L18 18M18 6L6 18\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n</svg>\n"
+  },
+  "close-circle": {
+    "concept": "close-circle",
     "name": "Outline / Essentional, UI / Close Circle",
     "svg": "<svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n<circle cx=\"12\" cy=\"12\" r=\"10\" stroke=\"black\" stroke-width=\"1.5\"/>\n<path d=\"M14.5 9.49999L9.5 14.5M9.49998 9.49997L14.5 14.4999\" stroke=\"black\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>\n</svg>\n"
   },
