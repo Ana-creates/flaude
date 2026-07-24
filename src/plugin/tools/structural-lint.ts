@@ -636,7 +636,12 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       //    (e.g. a full-bleed header behind a title) — that's not the "can't
       //    select this button as one thing" defect this rule targets.
       const isScreenRootSized = w >= 350 && h >= 700;
-      if ('children' in node && node.children.length >= 3 && !isScreenRootSized) {
+      // Skip anything inside a component instance (keyboard key rows, seeded
+      // chrome): a component's internal background+label pairs are the
+      // component's business, not a screen-level "ungroup this" defect. The
+      // visit() traversal already stops at instance boundaries, but guard here
+      // too since this frame can be reached as a direct instance child.
+      if ('children' in node && node.children.length >= 3 && !isScreenRootSized && !isInsideInstance(node)) {
         const shapeChildren = node.children.filter(
           (c): c is RectangleNode | FrameNode | EllipseNode =>
             c.type === 'RECTANGLE' || c.type === 'FRAME' || c.type === 'ELLIPSE'
