@@ -47,6 +47,8 @@ import {
   recordComparisonMarker,
   checkReviewMissing,
   recordReviewMarker,
+  checkBuiltFromMemory,
+  REF_REGIONS_KEY,
 } from '../tools/reference-tracking';
 import {
   recordFindings,
@@ -119,6 +121,22 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     }
     recordReviewMarker(`${refNodeId}::${builtNodeId}`);
     return { ok: true, verdict: (params.verdict as string) ?? null };
+  },
+
+  // Stamp a REF frame with its deterministically-measured content-region count
+  // (called by the Pro `analyze_reference` tool after it measures the PNG), so
+  // the plugin-side checkBuiltFromMemory lint can compare a build against how
+  // much the reference actually contains — without image libraries plugin-side.
+  stamp_reference_analysis: async (params) => {
+    const nodeId = params.nodeId as string;
+    const regionCount = params.regionCount as number;
+    if (!nodeId || typeof regionCount !== 'number') {
+      throw new Error('`nodeId` and numeric `regionCount` are required');
+    }
+    const node = await figma.getNodeByIdAsync(nodeId);
+    if (!node) throw new Error(`node ${nodeId} not found`);
+    (node as SceneNode).setPluginData(REF_REGIONS_KEY, String(Math.round(regionCount)));
+    return { ok: true, nodeId, regionCount: Math.round(regionCount) };
   },
 
   // READ COMMANDS
@@ -426,6 +444,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         }
         lint.push(...checkPixelDiffMissing(page));
         lint.push(...checkReviewMissing(page));
+        lint.push(...checkBuiltFromMemory(page));
         if (lint.length > 0) {
           // Persist to the durable error ledger (fire-and-forget) so recurring
           // defects can later be analyzed and turned into new checks — the

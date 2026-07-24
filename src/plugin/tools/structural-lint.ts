@@ -24,7 +24,11 @@ interface LintFinding {
 const ICON_MIN = 10;
 const ICON_MAX = 40;
 
-const AVATAR_MIN = 28;
+// Lowered from 28 to 24 so an emoji/mood-sized flat circle also trips the rule
+// (root cause: Calm's "How are you feeling?" used a flat 26px yellow circle
+// standing in for a real smiley glyph). A true small pagination dot is <20px,
+// below this floor, so it's unaffected.
+const AVATAR_MIN = 24;
 const AVATAR_MAX = 140;
 
 // { label, width, height, widthTolerance, heightTolerance } — matches the
@@ -378,7 +382,7 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           rule: 'avatar-placeholder',
           nodeId: sceneNode.id,
           nodeName: sceneNode.name,
-          message: `Avatar-sized "${sceneNode.name}" (${Math.round(w)}x${Math.round(h)}) has a single flat fill — confirm the REF frame actually shows a blank avatar here; if it shows a real photo/logo, use a real image fill instead of a placeholder color.`,
+          message: `Avatar/emoji-sized "${sceneNode.name}" (${Math.round(w)}x${Math.round(h)}) is a single flat fill — a primitive standing in for a real asset. Confirm the REF frame shows a blank circle here; if it shows a real photo, brand logo, or emoji/glyph, use a real image fill (flaude.logo for brands) or the actual glyph instead of a placeholder color.`,
         });
       }
 

@@ -71,6 +71,43 @@ export function recordReviewMarker(pairKey: string): void {
   reviewedPairKeys.add(pairKey);
 }
 
+/** pluginData key on a REF frame holding its deterministically-measured
+ * content-region count (from the Pro `analyze_reference` tool, written via the
+ * `stamp_reference_analysis` command). Lets the plugin-side lint compare a
+ * build's element count against how much the reference actually contains,
+ * without the plugin needing image libraries. */
+export const REF_REGIONS_KEY = 'flaude:refRegionCount';
+
+/** Count "content elements" in a built screen subtree: a rough, deterministic
+ * proxy for "how many distinct things are on this screen", comparable to the
+ * reference's measured regionCount. Counts visible TEXT nodes, image-filled
+ * shapes, and leaf vector/shape nodes with a real fill; skips pure layout
+ * frames, chrome (status bar / home indicator), and containers. */
+function countContentElements(root: SceneNode): number {
+  let n = 0;
+  const CHROME = /status.?bar|home.?indicator/i;
+  const walk = (node: SceneNode, depth: number) => {
+    if (depth > 8) return;
+    if ('visible' in node && node.visible === false) return;
+    if (CHROME.test(node.name)) return; // chrome isn't "content"
+    if (node.type === 'TEXT') { n++; return; }
+    const fills = 'fills' in node ? (node as GeometryMixin).fills : null;
+    const hasImage = Array.isArray(fills) && fills.some((f) => f.type === 'IMAGE' && f.visible !== false);
+    if (hasImage) { n++; return; } // an image tile is one content element
+    const isLeafShape =
+      node.type === 'VECTOR' || node.type === 'ELLIPSE' || node.type === 'POLYGON' ||
+      node.type === 'STAR' || node.type === 'LINE' ||
+      (node.type === 'RECTANGLE' && Array.isArray(fills) && fills.length > 0) ||
+      node.type === 'INSTANCE';
+    // An instance/leaf shape is ONE content element — count it and stop, so an
+    // icon instance isn't double-counted as 1 + all its inner vectors.
+    if (isLeafShape) { n++; return; }
+    if ('children' in node) for (const c of node.children as readonly SceneNode[]) walk(c, depth + 1);
+  };
+  if ('children' in root) for (const c of root.children as readonly SceneNode[]) walk(c, 0);
+  return n;
+}
+
 export interface ReferenceCaptureFinding {
   rule: 'built-without-reference-capture';
   builtNodeId: string;
@@ -239,6 +276,77 @@ export function checkReviewMissing(page: PageNode): ReviewMissingFinding[] {
       refNodeName: ref.name,
       message: `\u26a0\ufe0f NEVER VISUALLY REVIEWED -- "${child.name}" exists alongside "${ref.name}" but the review->fix loop has never run for this pair this session. A low pixel-diff can still hide placeholder fidelity (flat tiles where the reference shows a real photo collage, solid circles for real avatars/logos, wrong brand feel). Run the visual reviewer against "${ref.name}", apply its fixes, then call record_review_pass({ refNodeId: "${ref.id}", builtNodeId: "${child.id}", verdict }) -- this screen is NOT done until that pass is recorded.`,
     });
+  }
+
+  return findings;
+}
+
+export interface BuiltFromMemoryFinding {
+  rule: 'built-omits-reference-elements';
+  builtNodeId: string;
+  builtNodeName: string;
+  refNodeId: string;
+  refNodeName: string;
+  message: string;
+}
+
+/**
+ * Catch "built from memory instead of from this frame": a build far sparser
+ * than its reference. The reference's measured content-region count is stamped
+ * on the REF frame by the Pro `analyze_reference` tool (REF_REGIONS_KEY); this
+ * compares it to the built screen's counted content elements and fires only on
+ * a GROSS deficit (build < 40% of the reference's regions, and the reference
+ * had a meaningful amount), so it flags dropped rows / omitted chrome / wrong
+ * variant — not minor differences. If the REF was never measured, it nudges
+ * to run analyze_reference so the check can work (and crops stop being
+ * eyeballed). Deterministic, no image libraries needed plugin-side.
+ */
+export function checkBuiltFromMemory(page: PageNode): BuiltFromMemoryFinding[] {
+  const findings: BuiltFromMemoryFinding[] = [];
+
+  const refByScreenName = new Map<string, { id: string; name: string; regions: number }>();
+  for (const child of page.children) {
+    if (child.name.startsWith('REF /')) {
+      const screenName = child.name.slice('REF /'.length).trim();
+      const raw = child.getPluginData(REF_REGIONS_KEY);
+      const regions = raw ? parseInt(raw, 10) : -1;
+      refByScreenName.set(screenName, { id: child.id, name: child.name, regions });
+    }
+  }
+  if (refByScreenName.size === 0) return findings;
+
+  for (const child of page.children) {
+    if (child.type !== 'FRAME' && child.type !== 'COMPONENT') continue;
+    if (child.name.startsWith('REF /')) continue;
+    const separatorIndex = child.name.indexOf(' / ');
+    if (separatorIndex === -1) continue;
+    const screenName = child.name.slice(separatorIndex + 3).trim();
+    const ref = refByScreenName.get(screenName);
+    if (!ref) continue;
+
+    if (ref.regions < 0) {
+      findings.push({
+        rule: 'built-omits-reference-elements',
+        builtNodeId: child.id,
+        builtNodeName: child.name,
+        refNodeId: ref.id,
+        refNodeName: ref.name,
+        message: `\u26a0\ufe0f REFERENCE NOT MEASURED \u2014 "${ref.name}" has never been run through analyze_reference, so "built from memory" (a build far sparser than the reference) can't be caught and crops are being eyeballed. Call analyze_reference({ refNodeId: "${ref.id}" }) \u2014 it returns measured crop boxes and stamps the reference's content-region count for this check.`,
+      });
+      continue;
+    }
+
+    const built = countContentElements(child as SceneNode);
+    if (ref.regions >= 6 && built < ref.regions * 0.4) {
+      findings.push({
+        rule: 'built-omits-reference-elements',
+        builtNodeId: child.id,
+        builtNodeName: child.name,
+        refNodeId: ref.id,
+        refNodeName: ref.name,
+        message: `\u26a0\ufe0f BUILT FROM MEMORY? \u2014 "${child.name}" has ${built} content elements but the reference "${ref.name}" measured ~${ref.regions} distinct content regions. A build this much sparser usually means elements were dropped (rows, chrome, a whole section) or the wrong state/variant was built (e.g. a 3-tab bar rebuilt as 4). Re-check the reference element-by-element and rebuild the missing pieces from THIS frame, not from memory.`,
+      });
+    }
   }
 
   return findings;
