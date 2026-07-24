@@ -478,14 +478,32 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       // not a missing avatar, so it must NOT trip the avatar-placeholder rule.
       const adjImg = adjacentSides(sceneNode, { imageOnly: true });
       const inPhotoComposite = adjImg.above || adjImg.below || adjImg.left || adjImg.right;
+      // A shape that CONTAINS a visible glyph/image/text child is a button or a
+      // filled element, not an empty avatar placeholder (observed false-positive
+      // storm: 73 hits on keyboard keys inside the keyboard instance and on
+      // white action-button circles). Exclude those, and never descend into
+      // component instances (keyboard keys, seeded chrome) — their internals are
+      // never "missing avatars".
+      const hasContentChild =
+        'children' in node &&
+        (node as ChildrenMixin).children.some(
+          (c) => c.visible !== false &&
+            (c.type === 'INSTANCE' || c.type === 'VECTOR' || c.type === 'GROUP' ||
+             c.type === 'BOOLEAN_OPERATION' || c.type === 'TEXT' ||
+             (('fills' in c) && Array.isArray((c as GeometryMixin).fills) &&
+               (c as GeometryMixin).fills !== figma.mixed &&
+               ((c as GeometryMixin).fills as readonly Paint[]).some((fp) => fp.type === 'IMAGE')))
+        );
       if (
         pageHasRefFrames &&
+        !isInsideInstance(node) &&
         (node.type === 'ELLIPSE' || node.type === 'RECTANGLE' || node.type === 'FRAME') &&
         w >= AVATAR_MIN && w <= AVATAR_MAX && h >= AVATAR_MIN && h <= AVATAR_MAX &&
         nearSquare(w, h) &&
         hasFlatSolidFill(sceneNode) &&
         !hasCenteredInitials(sceneNode) &&
-        !inPhotoComposite
+        !inPhotoComposite &&
+        !hasContentChild
       ) {
         findings.push({
           rule: 'avatar-placeholder',
