@@ -329,6 +329,78 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         });
       }
 
+      // 1b. Glyph not centered in its button/circle. THE EYE SKIPS THIS; the
+      //     geometry can't. For an icon-sized node sitting inside a button-like
+      //     container (a circle, or a rounded square 32–104px), the glyph's
+      //     center must match the container's center within a tight tolerance.
+      //     A visibly-off-center icon (observed: Tinder action-button glyphs
+      //     28px / 25px off center on a 66px circle) reads as "broken" but is
+      //     easy to slide past by eye — so measure it. Container is found as the
+      //     icon's PARENT (if button-sized) OR a sibling ellipse/rounded-rect
+      //     that contains the icon's center. Tolerance: > max(4px, 14% of the
+      //     container size).
+      if (
+        (node.type === 'INSTANCE' || node.type === 'VECTOR' ||
+         node.type === 'GROUP' || node.type === 'BOOLEAN_OPERATION' ||
+         node.type === 'STAR' || node.type === 'TEXT') &&
+        w >= ICON_MIN && w <= ICON_MAX && h >= ICON_MIN && h <= ICON_MAX
+      ) {
+        const icx = sceneNode.x + w / 2;
+        const icy = sceneNode.y + h / 2;
+        const isButtonish = (n: SceneNode): boolean => {
+          if (n === sceneNode) return false;
+          if (n.type === 'ELLIPSE') { /* circle */ }
+          else if (n.type === 'RECTANGLE' || n.type === 'FRAME') {
+            const r = (n as RectangleNode | FrameNode).cornerRadius;
+            if (typeof r !== 'number' || r < 6) return false; // must be rounded
+          } else return false;
+          const bw = n.width, bh = n.height;
+          if (bw < 32 || bw > 104 || bh < 32 || bh > 104) return false;
+          // Must be roughly SQUARE. A circle/square icon-button is ~1:1 and
+          // does center its glyph; a WIDE pill/chip (icon + label) is not a
+          // centering container — its icon is intentionally left of the text, so
+          // excluding wide containers avoids false-positiving those.
+          const aspect = bh === 0 ? 99 : bw / bh;
+          if (aspect < 0.72 || aspect > 1.4) return false;
+          // container must be meaningfully bigger than the glyph (a real button)
+          return bw >= w * 1.25 && bh >= h * 1.25;
+        };
+        // container = parent if button-sized, else a sibling that contains us
+        let container: SceneNode | null = null;
+        const parent = node.parent as SceneNode | null;
+        if (parent && isButtonish(parent)) container = parent;
+        else if (parent && 'children' in parent) {
+          for (const sib of (parent as ChildrenMixin).children as readonly SceneNode[]) {
+            if (!isButtonish(sib)) continue;
+            // sibling's box must contain the glyph's center
+            if (icx >= sib.x && icx <= sib.x + sib.width && icy >= sib.y && icy <= sib.y + sib.height) {
+              container = sib; break;
+            }
+          }
+        }
+        if (container) {
+          const isParent = container === parent;
+          // for a parent container the glyph x/y are relative to it; for a
+          // sibling they share the same coordinate space — normalize both to the
+          // glyph-vs-container center offset.
+          const ccx = isParent ? container.width / 2 : container.x + container.width / 2;
+          const ccy = isParent ? container.height / 2 : container.y + container.height / 2;
+          const gcx = isParent ? w / 2 + sceneNode.x : icx;
+          const gcy = isParent ? h / 2 + sceneNode.y : icy;
+          const offX = Math.abs(gcx - ccx);
+          const offY = Math.abs(gcy - ccy);
+          const tol = Math.max(4, container.width * 0.14);
+          if (offX > tol || offY > tol) {
+            findings.push({
+              rule: 'glyph-not-centered-in-container',
+              nodeId: sceneNode.id,
+              nodeName: sceneNode.name,
+              message: `Glyph "${sceneNode.name}" is off-center inside its ${container.width}×${container.height} ${container.type.toLowerCase()} by (${Math.round(offX)}, ${Math.round(offY)})px — tolerance ${Math.round(tol)}px. Icons inside buttons/circles must be centered: set the glyph x = container center − glyph.width/2 and y = container center − glyph.height/2. (This is a defect the eye slides past but is obvious once measured.)`,
+            });
+          }
+        }
+      }
+
       // 2. Hand-drawn iOS chrome: a node matching known status-bar/keyboard/
       //    home-indicator dimensions that isn't itself (or inside) an
       //    instance of the real seeded/bundled component. Bare TEXT nodes are
