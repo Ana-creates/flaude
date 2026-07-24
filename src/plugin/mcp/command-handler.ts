@@ -49,6 +49,8 @@ import {
   recordReviewMarker,
   checkBuiltFromMemory,
   REF_REGIONS_KEY,
+  recordDiffResult,
+  checkFidelityBar,
 } from '../tools/reference-tracking';
 import {
   recordFindings,
@@ -127,6 +129,22 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // (called by the Pro `analyze_reference` tool after it measures the PNG), so
   // the plugin-side checkBuiltFromMemory lint can compare a build against how
   // much the reference actually contains — without image libraries plugin-side.
+  // Record a real pixel-diff RESULT for a (ref, built) pair. Called by the Pro
+  // compare_to_reference tool after compareImages computes the binding verdict,
+  // so the plugin's checkFidelityBar lint keeps a FAILED screen "not done"
+  // until the pixels actually match the reference. Verdict is code, not opinion.
+  record_diff_result: (params) => {
+    const refNodeId = params.refNodeId as string;
+    const builtNodeId = params.builtNodeId as string;
+    const mismatch = params.mismatch as number;
+    const pass = params.pass as boolean;
+    if (!refNodeId || !builtNodeId || typeof mismatch !== 'number' || typeof pass !== 'boolean') {
+      throw new Error('`refNodeId`, `builtNodeId`, numeric `mismatch`, boolean `pass` all required');
+    }
+    recordDiffResult(`${refNodeId}::${builtNodeId}`, mismatch, pass);
+    return { ok: true, pass, mismatch };
+  },
+
   stamp_reference_analysis: async (params) => {
     const nodeId = params.nodeId as string;
     const regionCount = params.regionCount as number;
@@ -445,6 +463,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         lint.push(...checkPixelDiffMissing(page));
         lint.push(...checkReviewMissing(page));
         lint.push(...checkBuiltFromMemory(page));
+        lint.push(...checkFidelityBar(page));
         if (lint.length > 0) {
           // Persist to the durable error ledger (fire-and-forget) so recurring
           // defects can later be analyzed and turned into new checks — the

@@ -50,6 +50,26 @@ export function recordComparisonMarker(pairKey: string): void {
   comparedPairKeys.add(pairKey);
 }
 
+// The BINDING fidelity verdict per (ref, built) pair, set by the Pro
+// compare_to_reference tool (via the record_diff_result command) from the
+// code-computed PASS/FAIL — NOT from any narration. This is the mechanism that
+// stops "grading against my own previous build": while a pair's last verdict is
+// FAIL, the screen is not done, full stop, and no prose can override it.
+const pairVerdict = new Map<string, { mismatch: number; pass: boolean }>();
+
+/** Mirrors FIDELITY_THRESHOLD in the Pro image-diff module (the authority that
+ * actually computes PASS/FAIL). Used here only for the lint MESSAGE text; the
+ * pass/fail decision itself always comes from recordDiffResult, never recomputed
+ * here, so the two can't disagree on the verdict. */
+const FIDELITY_BAR_PCT = 8;
+
+/** Record a real pixel-diff RESULT (not just that it ran) for a pair. Called by
+ * the record_diff_result command that Pro invokes after compareImages. */
+export function recordDiffResult(pairKey: string, mismatch: number, pass: boolean): void {
+  comparedPairKeys.add(pairKey);
+  pairVerdict.set(pairKey, { mismatch, pass });
+}
+
 // Root cause (this session): 20 app screens were built and called "done"
 // while ~80% were placeholder-fidelity — flat gradient tiles where the
 // reference showed real imagery (Pinterest board collages), solid-color
@@ -345,6 +365,60 @@ export function checkBuiltFromMemory(page: PageNode): BuiltFromMemoryFinding[] {
         refNodeId: ref.id,
         refNodeName: ref.name,
         message: `\u26a0\ufe0f BUILT FROM MEMORY? \u2014 "${child.name}" has ${built} content elements but the reference "${ref.name}" measured ~${ref.regions} distinct content regions. A build this much sparser usually means elements were dropped (rows, chrome, a whole section) or the wrong state/variant was built (e.g. a 3-tab bar rebuilt as 4). Re-check the reference element-by-element and rebuild the missing pieces from THIS frame, not from memory.`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+export interface FidelityBarFinding {
+  rule: 'built-below-fidelity-bar';
+  builtNodeId: string;
+  builtNodeName: string;
+  refNodeId: string;
+  refNodeName: string;
+  message: string;
+}
+
+/**
+ * The BINDING fidelity gate. For any (ref, built) pair whose last real
+ * pixel-diff FAILED the code-computed bar (recordDiffResult with pass=false),
+ * keep firing until it passes. This is the mechanism that stops "grading
+ * against my own previous build": the verdict is derived in code from the
+ * mismatch vs the REFERENCE, and while it is FAIL the screen is mechanically
+ * NOT done — no narration ("massive improvement", "reasonable for a dense
+ * screen") can clear it. Only getting the pixels close to the reference, or an
+ * explicit recorded override, clears it.
+ */
+export function checkFidelityBar(page: PageNode): FidelityBarFinding[] {
+  const findings: FidelityBarFinding[] = [];
+
+  const refByScreenName = new Map<string, { id: string; name: string }>();
+  for (const child of page.children) {
+    if (child.name.startsWith('REF /')) {
+      refByScreenName.set(child.name.slice('REF /'.length).trim(), { id: child.id, name: child.name });
+    }
+  }
+  if (refByScreenName.size === 0) return findings;
+
+  for (const child of page.children) {
+    if (child.type !== 'FRAME' && child.type !== 'COMPONENT') continue;
+    if (child.name.startsWith('REF /')) continue;
+    const sep = child.name.indexOf(' / ');
+    if (sep === -1) continue;
+    const ref = refByScreenName.get(child.name.slice(sep + 3).trim());
+    if (!ref) continue;
+
+    const v = pairVerdict.get(`${ref.id}::${child.id}`);
+    if (v && !v.pass) {
+      findings.push({
+        rule: 'built-below-fidelity-bar',
+        builtNodeId: child.id,
+        builtNodeName: child.name,
+        refNodeId: ref.id,
+        refNodeName: ref.name,
+        message: `\u26d4 BELOW FIDELITY BAR \u2014 "${child.name}" last diffed at ${v.mismatch}% mismatch against "${ref.name}", over the ${FIDELITY_BAR_PCT}% bar, so it is NOT done. This is a code verdict, not an opinion \u2014 do NOT rationalize it as "close enough" or compare it to a previous build; the only baseline is the reference image. Fix the pixels that differ (use diffByQuadrant to locate them) and re-run compare_to_reference until it PASSES, or record an explicit override with a stated reason.`,
       });
     }
   }
