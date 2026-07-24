@@ -565,7 +565,11 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         !hasCenteredInitials(sceneNode) &&
         !inPhotoComposite &&
         !hasContentChild &&
-        !hasGlyphSiblingOnTop
+        !hasGlyphSiblingOnTop &&
+        // A flat circle inside a promo/banner/card container is a decorative
+        // element (a camera-lens icon, a status dot), not a missing avatar — the
+        // container name says it's not an avatar slot.
+        !(node.parent && /promo|banner|card|badge|chip/i.test(node.parent.name))
       ) {
         findings.push({
           rule: 'avatar-placeholder',
