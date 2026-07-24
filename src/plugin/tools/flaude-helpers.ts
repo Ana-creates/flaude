@@ -448,12 +448,21 @@ export async function flaudeListRow(opts: FlaudeRowOptions): Promise<FrameNode> 
   for (const st of ['Regular', 'Medium', 'Semi Bold', 'Bold']) {
     try { await figma.loadFontAsync({ family: fam, style: st }); } catch { /* fall back */ }
   }
-  const mk = (s: string, style: string, size: number, color: RGB): TextNode => {
+  // `fill=true` makes the text stretch to its column and TRUNCATE with an
+  // ellipsis instead of pushing the column wider than the row (which is what
+  // clipped titles like "John, Wa"). Titles/subtitles in a growing column must
+  // fill; a hugging label (time, badge) must not.
+  const mk = (s: string, style: string, size: number, color: RGB, fill = false): TextNode => {
     const t = figma.createText();
     t.fontName = { family: fam, style };
     t.fontSize = size;
     t.characters = s;
     t.fills = [{ type: 'SOLID', color }];
+    if (fill) {
+      t.layoutAlign = 'STRETCH';
+      t.textAutoResize = 'HEIGHT'; // fixed width from STRETCH, height grows
+      t.textTruncation = 'ENDING'; // ellipsis when a single line overflows
+    }
     return t;
   };
 
@@ -477,7 +486,8 @@ export async function flaudeListRow(opts: FlaudeRowOptions): Promise<FrameNode> 
   content.itemSpacing = 3;
   content.fills = [];
   content.primaryAxisSizingMode = 'AUTO';
-  content.counterAxisSizingMode = 'AUTO';
+  content.counterAxisSizingMode = 'FIXED'; // width comes from layoutGrow, so
+  // children can STRETCH+truncate within it instead of widening the row
   row.appendChild(content);
   content.layoutGrow = 1;
 
@@ -489,8 +499,8 @@ export async function flaudeListRow(opts: FlaudeRowOptions): Promise<FrameNode> 
   top.itemSpacing = 6;
   top.fills = [];
   top.counterAxisSizingMode = 'AUTO';
+  top.layoutAlign = 'STRETCH'; // full column width so time is pushed right
   content.appendChild(top);
-  top.layoutAlign = 'STRETCH';
 
   const titleWrap = figma.createFrame();
   titleWrap.layoutMode = 'HORIZONTAL';
@@ -500,14 +510,15 @@ export async function flaudeListRow(opts: FlaudeRowOptions): Promise<FrameNode> 
   titleWrap.primaryAxisSizingMode = 'AUTO';
   titleWrap.counterAxisSizingMode = 'AUTO';
   top.appendChild(titleWrap);
-  titleWrap.layoutGrow = 1;
-  titleWrap.appendChild(mk(opts.title, 'Semi Bold', opts.titleSize ?? 16, opts.titleColor ?? { r: 0.07, g: 0.07, b: 0.07 }));
-  if (opts.titleBadge) titleWrap.appendChild(opts.titleBadge);
+  titleWrap.layoutGrow = 1; // eats the row, pushing the time hard right
+  const titleNode = mk(opts.title, 'Semi Bold', opts.titleSize ?? 16, opts.titleColor ?? { r: 0.07, g: 0.07, b: 0.07 }, !opts.titleBadge);
+  titleWrap.appendChild(titleNode);
+  if (opts.titleBadge) { titleNode.layoutGrow = 1; titleWrap.appendChild(opts.titleBadge); }
 
   if (opts.time) top.appendChild(mk(opts.time, 'Regular', 12, opts.timeColor ?? { r: 0.66, g: 0.66, b: 0.67 }));
 
   for (const line of opts.subtitle ?? []) {
-    content.appendChild(mk(line, 'Regular', opts.subSize ?? 14, opts.subColor ?? { r: 0.54, g: 0.54, b: 0.56 }));
+    content.appendChild(mk(line, 'Regular', opts.subSize ?? 14, opts.subColor ?? { r: 0.54, g: 0.54, b: 0.56 }, true));
   }
   if (opts.trailingBadge) content.appendChild(opts.trailingBadge);
 
