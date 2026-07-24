@@ -354,15 +354,27 @@ function refImageHash(node: SceneNode): string | null {
   return img?.imageHash ?? null;
 }
 
+/** Categories of content it is legitimate to CROP from the reference because it
+ * genuinely can't be rebuilt or sourced: brand-specific posters, AI-generated
+ * art, a specific illustration/marketing image unique to that app. A generic
+ * photo of a PERSON / food / place is NOT here — those are placeholders in the
+ * real app and must be sourced as REAL stock images (flaude.image), never
+ * photocopied out of the reference screenshot. */
+export type FlaudeCropReason =
+  | 'brand-poster' | 'ai-art' | 'illustration' | 'logo-mark' | 'irreproducible';
+
 /**
- * Fill `node` with the measured `region` of a reference image, cropped COVER
- * (fill the node, center-crop the region, preserve aspect — no stretch). The
- * region is the normalized {x,y,w,h} box from analyze_reference. Returns node.
+ * Crop the measured `region` of a reference image into `node` (COVER, aspect-
+ * preserving). RESERVED for genuinely irreproducible brand-specific content —
+ * you MUST pass { reason }. Cropping the reference for generic imagery (a
+ * person, food, a scene) is photocopying the screenshot, not building the app;
+ * source a REAL stock image and use flaude.image instead. A crop with no valid
+ * reason is tagged UNJUSTIFIED and the reference-crop-unjustified lint flags it.
  */
 export async function flaudeCropFromReference(
   node: SceneNode & GeometryMixin,
   region: FlaudeCropRegion,
-  opts: FlaudeCropOptions = {}
+  opts: FlaudeCropOptions & { reason?: FlaudeCropReason } = {}
 ): Promise<SceneNode> {
   const hash = opts.hash ?? (opts.fromRef ? refImageHash(opts.fromRef) : null);
   if (!hash) {
@@ -406,6 +418,28 @@ export async function flaudeCropFromReference(
     } as ImagePaint,
   ];
   node.setPluginData('flaude:refCrop', 'true');
+  node.setPluginData('flaude:refCropReason', opts.reason ?? 'UNJUSTIFIED');
+  return node;
+}
+
+// ── REAL SOURCED IMAGE ────────────────────────────────────────────
+// The pit-of-success for "I sourced a real photo" (a person, food, a place):
+// upload a REAL stock image (the agent curls it, e.g. from Unsplash, and
+// createImage(base64)s it) and place it here as an aspect-COVER fill. Tagged
+// flaude:realImage — explicitly NOT a reference crop — so the crop lint leaves
+// it alone. This is how generic imagery gets into a build: real content, not a
+// slice of the reference screenshot.
+export interface FlaudeImageOptions { hash: string; scaleMode?: 'FILL' | 'FIT'; }
+
+export async function flaudeImage(
+  node: SceneNode & GeometryMixin,
+  opts: FlaudeImageOptions
+): Promise<SceneNode> {
+  const image = figma.getImageByHash(opts.hash);
+  if (!image) throw new Error(`flaude.image: no image for hash ${opts.hash}`);
+  node.fills = [{ type: 'IMAGE', imageHash: opts.hash, scaleMode: opts.scaleMode ?? 'FILL' } as ImagePaint];
+  node.setPluginData('flaude:realImage', 'true');
+  node.setPluginData('flaude:refCrop', ''); // ensure not treated as a ref crop
   return node;
 }
 
@@ -704,6 +738,7 @@ export const flaudeHelpers = {
   icon: flaudeIcon,
   logo: flaudeLogo,
   crop: flaudeCropFromReference,
+  image: flaudeImage,
   row: flaudeListRow,
   font: resolveIosFont,
   statusBar: flaudeStatusBar,

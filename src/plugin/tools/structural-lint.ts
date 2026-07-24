@@ -774,6 +774,32 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           }
         }
       }
+
+      // 13. Unjustified reference crop: an image node CROPPED out of the
+      //     reference screenshot (flaude:refCrop) with no valid reason. This is
+      //     the "screenshot everything" anti-pattern — photocopying a slice of
+      //     the reference instead of building the app. Generic imagery (a
+      //     person, food, a place, an avatar) must be a REAL sourced stock
+      //     image (flaude.image), NOT a crop of the reference. Cropping is
+      //     ONLY legitimate for genuinely irreproducible brand-specific content
+      //     (a brand poster, AI art, a specific illustration) AND must be
+      //     justified via flaude.crop(node, region, { reason }). Any refCrop
+      //     tagged UNJUSTIFIED (or missing a reason) is flagged here.
+      if (
+        (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'FRAME') &&
+        sceneNode.getPluginData('flaude:refCrop') === 'true'
+      ) {
+        const reason = sceneNode.getPluginData('flaude:refCropReason');
+        const VALID = ['brand-poster', 'ai-art', 'illustration', 'logo-mark', 'irreproducible'];
+        if (!reason || reason === 'UNJUSTIFIED' || !VALID.includes(reason)) {
+          findings.push({
+            rule: 'reference-crop-unjustified',
+            nodeId: sceneNode.id,
+            nodeName: sceneNode.name,
+            message: `"${sceneNode.name}" is a CROP of the reference screenshot with no valid reason — this is photocopying, not building. If it's generic imagery (a person, food, a place, an avatar), source a REAL stock image (curl one, e.g. from Unsplash, upload it, and use flaude.image) instead of slicing the reference. Cropping is ONLY for genuinely irreproducible brand-specific content (brand poster / AI art / specific illustration) — and then you must justify it: flaude.crop(node, region, { reason: 'brand-poster' | 'ai-art' | 'illustration' | 'logo-mark' | 'irreproducible' }).`,
+          });
+        }
+      }
     }
 
     if ('children' in node) {
