@@ -47,6 +47,8 @@ const IOS_CHROME_DIMENSIONS: Array<{
 ];
 
 const BUTTON_NAME_PATTERN = /button|pill|btn|cta/i;
+/** Names of docked bottom bars whose background should fill the safe area. */
+const BOTTOM_BAR_NAME = /nav|tab.?bar|toolbar|footer|bottom.?bar|dock/i;
 
 /** iOS bottom safe-area (home-indicator) inset in px. Mirrors the applier's
  * SAFE_AREA_BOTTOM so the lint threshold and the auto-inset agree. */
@@ -675,6 +677,44 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
               });
             }
             break;
+          }
+        }
+      }
+
+      // 11b. Footer background must reach the bottom edge. A docked bottom bar
+      //      (nav / tab bar / toolbar / footer) whose BACKGROUND stops short of
+      //      the screen's bottom edge leaves the frame background (usually
+      //      white) showing in the safe-area strip under the home indicator —
+      //      so a gray footer gets an ugly white band beneath it. The bar's
+      //      background should extend to the bottom edge and the safe-area gap
+      //      should be INTERNAL padding (content inset up), so the footer's own
+      //      color fills behind the pill. Complements rule 11 (which handles
+      //      content inset); this one is about background REACH, and unlike 11
+      //      it also catches absolutely-positioned / freeform footers.
+      if (
+        node.type === 'FRAME' &&
+        BOTTOM_BAR_NAME.test(sceneNode.name) &&
+        hasFlatSolidFill(sceneNode)
+      ) {
+        const parent = node.parent;
+        if (parent && 'height' in parent && 'width' in parent) {
+          const screen = parent as SceneNode & ChildrenMixin;
+          const isScreenSized = within(screen.width, 393, 60) && screen.height >= 700;
+          const barBottom = sceneNode.y + h;
+          const gap = screen.height - barBottom;
+          const isWide = w >= screen.width * 0.85;
+          const hasHi = (screen.children as SceneNode[]).some(
+            (k) => /home.?indicator/i.test(k.name) || (within(k.width, 134, 14) && within(k.height, 5, 4))
+          );
+          // Fires when the bar is wide, docked low, a home indicator exists,
+          // and the background leaves a visible strip (gap 4–60px) below it.
+          if (isScreenSized && isWide && hasHi && gap > 4 && gap < 60) {
+            findings.push({
+              rule: 'footer-background-not-reaching-bottom-edge',
+              nodeId: sceneNode.id,
+              nodeName: sceneNode.name,
+              message: `Footer/nav bar "${sceneNode.name}" ends ${Math.round(gap)}px above the screen bottom, so the frame background shows through in the home-indicator safe area (e.g. a white strip under a gray footer). FIX: extend its background to the bottom edge — resize height +${Math.round(gap)} (keep y) so bottom = ${Math.round(screen.height)}, and add paddingBottom ≈ ${SAFE_AREA_INSET} so the controls stay inset above the pill. The footer's own color then fills behind the home indicator.`,
+            });
           }
         }
       }
