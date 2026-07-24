@@ -214,13 +214,19 @@ interface CoreLogoEntry { slug: string; name: string; brandColor: string; svg: s
 const CORE_LOGOS = coreLogosBundle as Record<string, CoreLogoEntry>;
 const LOGOS_PAGE_NAME = '_Flaude Logos';
 
-function getOrCreateLogosPage(): PageNode {
+// MUST be async + loadAsync: in a dynamic-page document a page (found OR newly
+// created) is not "explicitly loaded", so appending to it — or any later
+// command iterating pages — throws "Cannot access children on a page that has
+// not been explicitly loaded", which wedged EVERY subsequent command. Loading
+// the page here keeps logo-seeding from corrupting document state.
+async function getOrCreateLogosPage(): Promise<PageNode> {
   const existing = figma.root.children.find(
     (p): p is PageNode => p.type === 'PAGE' && p.name === LOGOS_PAGE_NAME
   );
-  if (existing) return existing;
+  if (existing) { await existing.loadAsync(); return existing; }
   const page = figma.createPage();
   page.name = LOGOS_PAGE_NAME;
+  await page.loadAsync();
   return page;
 }
 
@@ -283,7 +289,7 @@ export async function flaudeLogo(brand: string, opts: FlaudeLogoOptions = {}): P
         `re-sourced.`
       );
     }
-    const page = getOrCreateLogosPage();
+    const page = await getOrCreateLogosPage();
     const svgNode = figma.createNodeFromSvg(svg);
     master = figma.createComponent();
     master.name = `logo/${brand} \u00b7 ${name}`;
