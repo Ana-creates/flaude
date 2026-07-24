@@ -98,6 +98,30 @@ export function recordReviewMarker(pairKey: string): void {
  * without the plugin needing image libraries. */
 export const REF_REGIONS_KEY = 'flaude:refRegionCount';
 
+/**
+ * Collect all descendants of `root` that the BUILDER placed — i.e. STOP at
+ * component-instance boundaries. A component's internals (keyboard keys, seeded
+ * status-bar/nav glyphs, icon vectors) are the component's concern, never a
+ * screen-level fact, so screen-level checks must not see them. This is the ONE
+ * shared traversal every screen-scoped rule should use instead of node.findAll,
+ * so no rule can re-leak instance internals (the recurring false-positive class:
+ * avatar-placeholder, ungrouped-label, composite-tile, wrong-font all hit it).
+ */
+export function collectOwnDescendants(root: SceneNode): SceneNode[] {
+  const out: SceneNode[] = [];
+  const walk = (node: SceneNode, depth: number) => {
+    if (depth > 40) return;
+    if ('children' in node && node.type !== 'INSTANCE') {
+      for (const c of (node as ChildrenMixin).children as readonly SceneNode[]) {
+        out.push(c);
+        walk(c, depth + 1);
+      }
+    }
+  };
+  walk(root, 0);
+  return out;
+}
+
 /** Count "content elements" in a built screen subtree: a rough, deterministic
  * proxy for "how many distinct things are on this screen", comparable to the
  * reference's measured regionCount. Counts visible TEXT nodes, image-filled
@@ -454,7 +478,14 @@ export function checkIosFont(page: PageNode): IosFontFinding[] {
     if (child.name.indexOf(' / ') === -1) continue;
     if (!(child.width >= 333 && child.width <= 453 && child.height >= 700)) continue;
 
-    const texts = child.findAll((n) => n.type === 'TEXT') as TextNode[];
+    // Only text the BUILDER placed — collectOwnDescendants stops at component
+    // instance boundaries, so a keyboard instance's keys (legitimately Inter)
+    // don't count against the screen's font. (Fixed a false positive where 26
+    // in-keyboard Inter keys flagged a screen whose 5 real texts were all SF
+    // Pro.)
+    const texts = collectOwnDescendants(child).filter(
+      (n): n is TextNode => n.type === 'TEXT'
+    );
     if (texts.length < 4) continue;
     let nonSystem = 0;
     let system = 0;
