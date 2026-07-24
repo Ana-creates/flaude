@@ -401,6 +401,34 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         }
       }
 
+      // 1c. Inconsistent icon sizes within one bar. A nav/tab/toolbar renders
+      //     its icons at ONE size; a stray icon that's noticeably bigger or
+      //     smaller than its siblings reads as broken but is easy to skip by
+      //     eye (observed: nav icons that looked "too small" vs the reference).
+      //     For a bar-like frame (wide, short, >=3 icon-instance children),
+      //     flag any icon whose size deviates >20% from the sibling median.
+      if (node.type === 'FRAME' && BOTTOM_BAR_NAME.test(sceneNode.name)) {
+        const frame = node as FrameNode;
+        const iconKids = frame.children.filter(
+          (c) => (c.type === 'INSTANCE' || c.type === 'VECTOR' || c.type === 'GROUP') &&
+            c.width >= ICON_MIN && c.width <= ICON_MAX + 8
+        ) as SceneNode[];
+        if (iconKids.length >= 3) {
+          const sizes = iconKids.map((c) => c.width).sort((a, b) => a - b);
+          const median = sizes[Math.floor(sizes.length / 2)];
+          for (const ic of iconKids) {
+            if (median > 0 && Math.abs(ic.width - median) / median > 0.2) {
+              findings.push({
+                rule: 'inconsistent-icon-size-in-bar',
+                nodeId: ic.id,
+                nodeName: ic.name,
+                message: `Icon "${ic.name}" is ${Math.round(ic.width)}px but its sibling icons in "${sceneNode.name}" are ~${Math.round(median)}px — a bar renders all icons at ONE size. Resize it to ${Math.round(median)}px so the row is uniform. (Easy to skip by eye, obvious once measured.)`,
+              });
+            }
+          }
+        }
+      }
+
       // 2. Hand-drawn iOS chrome: a node matching known status-bar/keyboard/
       //    home-indicator dimensions that isn't itself (or inside) an
       //    instance of the real seeded/bundled component. Bare TEXT nodes are
