@@ -322,6 +322,216 @@ export async function flaudeLogo(brand: string, opts: FlaudeLogoOptions = {}): P
   return inst;
 }
 
+// ── CROP-FROM-REFERENCE ───────────────────────────────────────────────
+// Root cause this kills: crops of real reference imagery (avatars, thumbnails)
+// were placed by HAND-TYPING an imageTransform from eyeballed normalized
+// offsets — so they repeatedly landed on the wrong part of the image (Telegram's
+// avatars came out blank/half). analyze_reference now MEASURES the region box;
+// this helper turns that measured box into the correct CROP transform so the
+// numbers are never typed by hand. It also matches the region to the node's
+// aspect ratio (COVER: center-crop, no distortion), and tags the node so the
+// crop-related lints recognize it.
+
+export interface FlaudeCropRegion { x: number; y: number; w: number; h: number }
+export interface FlaudeCropOptions {
+  /** Image hash to crop from. Either this or fromRef is required. */
+  hash?: string;
+  /** A REF frame whose first IMAGE fill supplies the hash (convenience). */
+  fromRef?: SceneNode;
+}
+
+function refImageHash(node: SceneNode): string | null {
+  if (!('fills' in node)) return null;
+  const fills = (node as GeometryMixin).fills;
+  if (!Array.isArray(fills)) return null;
+  const img = fills.find((f) => f.type === 'IMAGE') as ImagePaint | undefined;
+  return img?.imageHash ?? null;
+}
+
+/**
+ * Fill `node` with the measured `region` of a reference image, cropped COVER
+ * (fill the node, center-crop the region, preserve aspect — no stretch). The
+ * region is the normalized {x,y,w,h} box from analyze_reference. Returns node.
+ */
+export async function flaudeCropFromReference(
+  node: SceneNode & GeometryMixin,
+  region: FlaudeCropRegion,
+  opts: FlaudeCropOptions = {}
+): Promise<SceneNode> {
+  const hash = opts.hash ?? (opts.fromRef ? refImageHash(opts.fromRef) : null);
+  if (!hash) {
+    throw new Error(
+      'flaude.crop needs an image: pass { hash } or { fromRef } (a REF frame with an image fill).'
+    );
+  }
+  const image = figma.getImageByHash(hash);
+  if (!image) throw new Error(`flaude.crop: no image for hash ${hash}`);
+  const { width: imgW, height: imgH } = await image.getSizeAsync();
+
+  // Match the region to the node's aspect ratio (COVER) so faces aren't
+  // stretched. Work in image PIXELS, then convert back to normalized.
+  const nodeAspect = node.height === 0 ? 1 : node.width / node.height;
+  const regPxW = region.w * imgW;
+  const regPxH = region.h * imgH;
+  const regAspect = regPxH === 0 ? 1 : regPxW / regPxH;
+
+  let { x, y, w, h } = region;
+  if (regAspect > nodeAspect) {
+    // region too wide — shrink width, keep height, recentre horizontally
+    const newW = (regPxH * nodeAspect) / imgW;
+    x = x + (w - newW) / 2;
+    w = newW;
+  } else {
+    // region too tall — shrink height, keep width, recentre vertically
+    const newH = (regPxW / nodeAspect) / imgH;
+    y = y + (h - newH) / 2;
+    h = newH;
+  }
+  // clamp inside the image
+  x = Math.max(0, Math.min(1 - w, x));
+  y = Math.max(0, Math.min(1 - h, y));
+
+  node.fills = [
+    {
+      type: 'IMAGE',
+      imageHash: hash,
+      scaleMode: 'CROP',
+      imageTransform: [[w, 0, x], [0, h, y]],
+    } as ImagePaint,
+  ];
+  node.setPluginData('flaude:refCrop', 'true');
+  return node;
+}
+
+// ── LIST ROW ───────────────────────────────────────────────────────
+// Root cause this kills (two recurring bugs, one source): list rows were built
+// by ABSOLUTE-positioning every element with hand-typed x/y — so titles/times
+// landed shifted right ("text on the right"), and per-row extras (drag handles)
+// were added by a blanket `for every row` loop instead of per-row data (so
+// handles appeared on ALL rows when the reference has them on 3). This builds a
+// row as a real HORIZONTAL auto-layout — [leading | growing text column | time]
+// with an optional right-edge handle — so spacing is COMPUTED, never typed, and
+// every per-row extra is driven by explicit data. The correct path is now the
+// short path, so hand-positioning a row is never the easy option.
+
+export interface FlaudeRowOptions {
+  /** Fixed row width (the list column width). */
+  width: number;
+  /** Fixed row height; omit to hug content. */
+  height?: number;
+  /** Leading node (avatar/icon), already built (e.g. via flaude.crop / logo). */
+  leading?: SceneNode;
+  title: string;
+  /** Node placed immediately after the title (e.g. a verified check). */
+  titleBadge?: SceneNode;
+  /** Preview/subtitle lines under the title. */
+  subtitle?: string[];
+  /** Top-right timestamp. */
+  time?: string;
+  /** Node under the time (e.g. an unread-count pill). */
+  trailingBadge?: SceneNode;
+  /** PER-ROW: draw a right-edge drag handle. Must be set from reference data,
+   * NOT a blanket loop — that is the bug this exists to prevent. */
+  showHandle?: boolean;
+  gap?: number;
+  fontFamily?: string;
+  titleSize?: number; titleColor?: RGB;
+  subSize?: number; subColor?: RGB;
+  timeColor?: RGB;
+}
+
+/** Build one list row as HORIZONTAL auto-layout with a growing text column, so
+ * the timestamp is pushed to the true right edge by layout math (not a typed x)
+ * and handles/badges come only from explicit per-row data. */
+export async function flaudeListRow(opts: FlaudeRowOptions): Promise<FrameNode> {
+  const fam = opts.fontFamily ?? 'Inter';
+  for (const st of ['Regular', 'Medium', 'Semi Bold', 'Bold']) {
+    try { await figma.loadFontAsync({ family: fam, style: st }); } catch { /* fall back */ }
+  }
+  const mk = (s: string, style: string, size: number, color: RGB): TextNode => {
+    const t = figma.createText();
+    t.fontName = { family: fam, style };
+    t.fontSize = size;
+    t.characters = s;
+    t.fills = [{ type: 'SOLID', color }];
+    return t;
+  };
+
+  const row = figma.createFrame();
+  row.name = 'row';
+  row.layoutMode = 'HORIZONTAL';
+  row.counterAxisAlignItems = 'CENTER';
+  row.itemSpacing = opts.gap ?? 12;
+  row.fills = [];
+  row.resize(opts.width, opts.height ?? 60);
+  row.primaryAxisSizingMode = 'FIXED';
+  row.counterAxisSizingMode = opts.height ? 'FIXED' : 'AUTO';
+
+  if (opts.leading) row.appendChild(opts.leading);
+
+  // Growing text column: fills the space between leading and the row's right
+  // edge, so anything after it is pushed fully right.
+  const content = figma.createFrame();
+  content.name = 'text';
+  content.layoutMode = 'VERTICAL';
+  content.itemSpacing = 3;
+  content.fills = [];
+  content.primaryAxisSizingMode = 'AUTO';
+  content.counterAxisSizingMode = 'AUTO';
+  row.appendChild(content);
+  content.layoutGrow = 1;
+
+  // Top line: [title (+badge) grows] [time hugs right].
+  const top = figma.createFrame();
+  top.name = 'topline';
+  top.layoutMode = 'HORIZONTAL';
+  top.counterAxisAlignItems = 'CENTER';
+  top.itemSpacing = 6;
+  top.fills = [];
+  top.counterAxisSizingMode = 'AUTO';
+  content.appendChild(top);
+  top.layoutAlign = 'STRETCH';
+
+  const titleWrap = figma.createFrame();
+  titleWrap.layoutMode = 'HORIZONTAL';
+  titleWrap.counterAxisAlignItems = 'CENTER';
+  titleWrap.itemSpacing = 5;
+  titleWrap.fills = [];
+  titleWrap.primaryAxisSizingMode = 'AUTO';
+  titleWrap.counterAxisSizingMode = 'AUTO';
+  top.appendChild(titleWrap);
+  titleWrap.layoutGrow = 1;
+  titleWrap.appendChild(mk(opts.title, 'Semi Bold', opts.titleSize ?? 16, opts.titleColor ?? { r: 0.07, g: 0.07, b: 0.07 }));
+  if (opts.titleBadge) titleWrap.appendChild(opts.titleBadge);
+
+  if (opts.time) top.appendChild(mk(opts.time, 'Regular', 12, opts.timeColor ?? { r: 0.66, g: 0.66, b: 0.67 }));
+
+  for (const line of opts.subtitle ?? []) {
+    content.appendChild(mk(line, 'Regular', opts.subSize ?? 14, opts.subColor ?? { r: 0.54, g: 0.54, b: 0.56 }));
+  }
+  if (opts.trailingBadge) content.appendChild(opts.trailingBadge);
+
+  // Right-edge drag handle — vertically centered by the row's CENTER alignment.
+  // Only when this row's data says so.
+  if (opts.showHandle) {
+    const h = figma.createFrame();
+    h.name = 'handle';
+    h.layoutMode = 'VERTICAL';
+    h.itemSpacing = 3.5;
+    h.fills = [];
+    h.primaryAxisSizingMode = 'AUTO';
+    h.counterAxisSizingMode = 'AUTO';
+    for (let i = 0; i < 3; i++) {
+      const ln = figma.createRectangle();
+      ln.resize(16, 1.5);
+      ln.fills = [{ type: 'SOLID', color: { r: 0.78, g: 0.78, b: 0.8 } }];
+      h.appendChild(ln);
+    }
+    row.appendChild(h);
+  }
+  return row;
+}
+
 async function seededComponent(id: string, label: string): Promise<ComponentNode> {
   // getNodeByIdAsync (not the sync getNodeById) is required for nodes on
   // pages that aren't currently loaded in dynamic-page documents.
@@ -407,6 +617,8 @@ export async function flaudeKeyboard(opts: FlaudeKeyboardOptions = {}): Promise<
 export const flaudeHelpers = {
   icon: flaudeIcon,
   logo: flaudeLogo,
+  crop: flaudeCropFromReference,
+  row: flaudeListRow,
   statusBar: flaudeStatusBar,
   homeIndicator: flaudeHomeIndicator,
   keyboard: flaudeKeyboard,
