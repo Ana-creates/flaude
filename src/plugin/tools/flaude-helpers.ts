@@ -54,6 +54,25 @@ async function findIconComponent(concept: string): Promise<ComponentNode | null>
   return (matches.find((c) => c.name.startsWith(prefix)) as ComponentNode | undefined) ?? null;
 }
 
+/** pluginData key holding the exact SVG a seeded icon master was built from,
+ * so a later call can detect that the bundled art changed and self-heal it. */
+const ICON_STAMP_KEY = 'flaude:iconStamp';
+/** Stamp prefix marking a master seeded from a caller's custom opts.svg — a
+ * bundle refresh must never overwrite a deliberate override. */
+const CUSTOM_STAMP_PREFIX = 'custom::';
+
+/** Refresh an existing icon master's content + name IN PLACE from new SVG.
+ * Existing instances mirror the main component, so they all update too. */
+function reseedIconComponent(master: ComponentNode, svg: string, name: string) {
+  for (const child of [...master.children]) child.remove();
+  const svgNode = figma.createNodeFromSvg(svg);
+  master.resize(svgNode.width, svgNode.height);
+  master.appendChild(svgNode);
+  svgNode.x = 0;
+  svgNode.y = 0;
+  master.name = name;
+}
+
 export interface FlaudeIconOptions {
   /** Optional SVG source + display name to seed a NON-core concept the first
    * time it's used in this file. The 54 premade core concepts do NOT need
@@ -106,6 +125,25 @@ export function drainFailedIconLookups(): FailedIconLookup[] {
  */
 export async function flaudeIcon(concept: string, opts: FlaudeIconOptions = {}): Promise<InstanceNode> {
   let master = await findIconComponent(concept);
+  const bundled = CORE_ICONS[concept];
+
+  // Self-heal stale bundled icons. findIconComponent reuses ANY existing
+  // `<concept> · …` master, so once a file has seeded an icon it is frozen: a
+  // later fix to the bundled art (e.g. `plus` used to be the "Add Circle"
+  // glyph WITH a circle, now it's a bare plus) would never reach that file.
+  // We stamp every seed with the exact SVG it came from; if a core concept's
+  // master was seeded from DIFFERENT bundled art — or is a pre-stamp legacy
+  // master (empty stamp) — and the caller isn't deliberately overriding with
+  // opts.svg, refresh the master's content + name IN PLACE so every existing
+  // instance updates too.
+  if (master && bundled && !opts.svg) {
+    const stamp = master.getPluginData(ICON_STAMP_KEY);
+    if (!stamp.startsWith(CUSTOM_STAMP_PREFIX) && stamp !== bundled.svg) {
+      reseedIconComponent(master, bundled.svg, `${concept} · ${bundled.name}`);
+      master.setPluginData(ICON_STAMP_KEY, bundled.svg);
+    }
+  }
+
   if (!master) {
     // An explicit opts.svg/name override wins; otherwise fall back to the
     // bundled premade set. Only a concept that is NEITHER already-in-file,
@@ -113,7 +151,6 @@ export async function flaudeIcon(concept: string, opts: FlaudeIconOptions = {}):
     // 'message-circle') reaches the throw — which is correct: that IS an
     // unresolvable icon, and it's still recorded for _lint even if the
     // caller swallows the throw.
-    const bundled = CORE_ICONS[concept];
     const svg = opts.svg ?? bundled?.svg;
     const name = opts.name ?? bundled?.name;
     if (!svg || !name) {
@@ -136,6 +173,10 @@ export async function flaudeIcon(concept: string, opts: FlaudeIconOptions = {}):
     svgNode.x = 0;
     svgNode.y = 0;
     page.appendChild(master);
+    // Stamp the source so future calls can detect a stale bundled icon and
+    // self-heal it (see the self-heal block above). Custom overrides get a
+    // distinct stamp so a bundle refresh never clobbers them.
+    master.setPluginData(ICON_STAMP_KEY, opts.svg ? `${CUSTOM_STAMP_PREFIX}${name}` : svg);
   }
 
   const inst = master.createInstance();
