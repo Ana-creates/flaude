@@ -206,6 +206,33 @@ export default function () {
     }
   });
 
+  // === Copy -> Insert (website handoff) ===
+  // The UI iframe fetches the screen DSL doc from the website (only the UI can
+  // fetch) and hands it here. main runs the `insert_screen` command, which
+  // rebuilds real, editable layers on the canvas via the shared DSL applier.
+
+  interface InsertScreenPayload {
+    requestId: string;
+    doc: unknown;
+  }
+
+  on('INSERT_SCREEN', async (payload: InsertScreenPayload) => {
+    try {
+      const result = await executeMCPCommand('insert_screen', {
+        doc: payload.doc,
+      });
+      emit('INSERT_SCREEN_RESULT', {
+        requestId: payload.requestId,
+        data: result,
+      });
+    } catch (error) {
+      emit('INSERT_SCREEN_RESULT', {
+        requestId: payload.requestId,
+        error: errorToString(error),
+      });
+    }
+  });
+
   // === Plugin lifecycle ===
 
   on('CLOSE_PLUGIN', () => {

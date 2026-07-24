@@ -57,6 +57,7 @@ import {
   getReviewerSharpening,
 } from '../tools/error-ledger';
 import { applyBuildBatch, setReferenceProvider } from './dsl-apply';
+import { planBuild, chunkOps } from './dsl-compiler-plan';
 import type { BuildBatch } from './dsl-compiler-plan';
 
 // Wire the DSL applier's crop-from-reference provider once, at module load.
@@ -97,6 +98,14 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // auto-lint: validation already happened server-side, and per-batch lint
   // noise defeats the purpose. Each batch is idempotent + acked.
   build_batch: (params) => applyBuildBatch(params as unknown as BuildBatch),
+
+  // COPY -> INSERT. Rebuild a whole screen from a DSL doc that the UI already
+  // fetched from the website (main can't fetch). This is the local, one-shot
+  // version of the server's batch drive: plan a full build (prev=null),
+  // chunk it, and apply every batch through the SAME idempotent applier as
+  // build_batch. Returns the created frame + node ids so the caller can report
+  // real, editable layers landed (never a screenshot).
+  insert_screen: (params) => insertScreen(params.doc),
 
   // REVIEW GATE. Clears the `built-without-review` lint for one (ref, built)
   // pair. The review orchestration calls this ONLY after the visual reviewer
@@ -618,6 +627,100 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // human edit — the mechanical close of the self-sharpening loop.
   get_reviewer_sharpening: async () => getReviewerSharpening(),
 };
+
+// Plugin-data keys the DSL applier writes on the screen frame. Re-declared here
+// (dsl-apply keeps them private) so insert_screen can read back the created
+// frame + its DSL-id -> node-id map WITHOUT modifying dsl-apply.
+const PD_SCREEN_ID = 'flaude:screenId';
+const PD_NODE_MAP = 'flaude:nodeMap';
+
+/** Result of an insert_screen run. */
+interface InsertScreenResult {
+  ok: boolean;
+  screenId: string;
+  /** Figma node id of the inserted screen frame, if it was created. */
+  nodeId: string | null;
+  /** Every created/updated figma node id (screen frame + descendants). */
+  nodeIds: string[];
+  /** How many batches were applied. */
+  batches: number;
+  /** Ops successfully applied across all batches. */
+  applied: number;
+  /** Op-level failures, surfaced (never silently dropped). */
+  errors: { batchIndex: number; opIndex: number; id: string; message: string }[];
+}
+
+/**
+ * Rebuild a screen from a DSL doc locally (the copy -> insert path). Mirrors the
+ * server's build drive but runs entirely in-plugin: full plan (prev=null),
+ * chunk, then apply every batch through applyBuildBatch. Selects + zooms to the
+ * inserted frame so the user sees the real editable layers appear.
+ */
+async function insertScreen(rawDoc: unknown): Promise<InsertScreenResult> {
+  const doc = rawDoc as { screen?: { id?: unknown } } | null;
+  const screenId =
+    doc && doc.screen && typeof doc.screen.id === 'string'
+      ? doc.screen.id
+      : null;
+  if (!doc || !doc.screen || !screenId) {
+    throw new Error(
+      'insert_screen: `doc` must be a screen DSL doc with a `screen.id` (got ' +
+        (doc ? 'a doc without screen.id' : 'nothing') +
+        ')'
+    );
+  }
+
+  const buildId = `insert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const ops = planBuild(null, doc);
+  const batches = chunkOps(ops, buildId, screenId);
+
+  const errors: InsertScreenResult['errors'] = [];
+  let applied = 0;
+  for (const batch of batches) {
+    const ack = await applyBuildBatch(batch);
+    applied += ack.applied;
+    for (const e of ack.errors) {
+      errors.push({
+        batchIndex: batch.batchIndex,
+        opIndex: e.opIndex,
+        id: e.id,
+        message: e.message,
+      });
+    }
+  }
+
+  // Read back the frame the applier created (it tags the frame with screenId)
+  // and the DSL-id -> node-id map it stored on the final batch.
+  const frame = figma.currentPage.findOne(
+    (n) => n.type === 'FRAME' && n.getPluginData(PD_SCREEN_ID) === screenId
+  ) as FrameNode | null;
+
+  let nodeIds: string[] = [];
+  if (frame) {
+    try {
+      const map = JSON.parse(frame.getPluginData(PD_NODE_MAP) || '{}') as Record<
+        string,
+        string
+      >;
+      nodeIds = Object.values(map);
+    } catch {
+      nodeIds = [frame.id];
+    }
+    if (!nodeIds.includes(frame.id)) nodeIds.push(frame.id);
+    figma.currentPage.selection = [frame];
+    figma.viewport.scrollAndZoomIntoView([frame]);
+  }
+
+  return {
+    ok: errors.length === 0 && !!frame,
+    screenId,
+    nodeId: frame ? frame.id : null,
+    nodeIds,
+    batches: batches.length,
+    applied,
+    errors,
+  };
+}
 
 /**
  * Execute an MCP command
