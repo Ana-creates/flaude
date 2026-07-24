@@ -307,8 +307,17 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       //    flaude.icon) or a bespoke icon that wasn't seeded (wrong: seed it
       //    via flaude.icon(concept, { svg, name }) so it's a reusable
       //    component). Either way the fix is the same: it must be an instance.
+      // STAR/POLYGON included: a raw createStar()/createPolygon() at icon size is
+      // almost always a hand-drawn composite glyph (e.g. a verified badge built
+      // from a star seal + a vector checkmark, which rendered malformed) — the
+      // exact thing that must be a library component (flaude.icon('verified')).
+      // ELLIPSE/LINE are excluded: they're legitimately loose at icon size as
+      // dots (pagination, status, avatar bg) and dividers, so flagging them
+      // would be noisy.
       if (
-        (node.type === 'VECTOR' || node.type === 'GROUP' || node.type === 'BOOLEAN_OPERATION') &&
+        (node.type === 'VECTOR' || node.type === 'GROUP' ||
+         node.type === 'BOOLEAN_OPERATION' || node.type === 'STAR' ||
+         node.type === 'POLYGON') &&
         w >= ICON_MIN && w <= ICON_MAX && h >= ICON_MIN && h <= ICON_MAX &&
         !isInsideInstance(node)
       ) {
