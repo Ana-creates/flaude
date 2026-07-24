@@ -25,6 +25,7 @@ import keyboardDarkExport from '../assets/keyboard-dark.json';
 // wrong-name call go silent). get_core_icons (server-side) stays the source
 // of truth; keep this bundled copy in sync if the core set changes.
 import coreIconsBundle from '../assets/core-icons.json';
+import coreLogosBundle from '../assets/core-logos.json';
 
 interface CoreIconEntry {
   concept: string;
@@ -202,6 +203,125 @@ export async function flaudeIcon(concept: string, opts: FlaudeIconOptions = {}):
   return inst;
 }
 
+// ── BRAND LOGO LIBRARY ────────────────────────────────────────────────────
+// Same principle as the icon library: source a brand logo ONCE, bundle it into
+// core-logos.json, and every user gets it with zero network lookups forever
+// (the plugin sandbox can't fetch anyway). flaude.logo('apple') self-seeds a
+// reusable component from the bundle and fills it with the brand color by
+// default. A brand not in the bundle must be passed { svg, name } once AND
+// added to core-logos.json so the save is permanent + public for all users.
+interface CoreLogoEntry { slug: string; name: string; brandColor: string; svg: string; }
+const CORE_LOGOS = coreLogosBundle as Record<string, CoreLogoEntry>;
+const LOGOS_PAGE_NAME = '_Flaude Logos';
+
+function getOrCreateLogosPage(): PageNode {
+  const existing = figma.root.children.find(
+    (p): p is PageNode => p.type === 'PAGE' && p.name === LOGOS_PAGE_NAME
+  );
+  if (existing) return existing;
+  const page = figma.createPage();
+  page.name = LOGOS_PAGE_NAME;
+  return page;
+}
+
+function hexToRgb(hex: string): RGB {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+}
+
+export interface FlaudeLogoOptions {
+  /** SVG + display name to seed a brand NOT in core-logos.json (source it once,
+   * then also add it to the bundle so the save is permanent for all users). */
+  svg?: string;
+  name?: string;
+  /** Brand hex used as the default fill; falls back to the bundled brandColor. */
+  brandColor?: string;
+  /** Rendered width in px (height scales to preserve the logo's aspect ratio). */
+  size?: number;
+  /** Explicit fill override (wins over brandColor) — e.g. white on a dark button. */
+  color?: RGB;
+  /** If true, do NOT apply the brand color — leave the glyph its default (black),
+   * for cases where the surrounding UI sets the tint. */
+  monochrome?: boolean;
+}
+
+/**
+ * Self-seeding brand logo. Mirrors flaudeIcon: reuse an existing
+ * `logo/<brand> · …` master, else seed one from the bundled SVG (or an explicit
+ * opts.svg for a new brand). Stamped + self-healing via the SAME mechanism as
+ * icons, so a corrected bundled logo propagates to already-seeded files.
+ * Defaults the fill to the brand color; pass { color } to override (e.g. a
+ * white Apple logo on a black "Continue with Apple" button).
+ */
+export async function flaudeLogo(brand: string, opts: FlaudeLogoOptions = {}): Promise<InstanceNode> {
+  await figma.loadAllPagesAsync();
+  const prefix = `logo/${brand} \u00b7 `;
+  const matches = figma.root.findAllWithCriteria({ types: ['COMPONENT'] });
+  let master = (matches.find((c) => c.name.startsWith(prefix)) as ComponentNode | undefined) ?? null;
+  const bundled = CORE_LOGOS[brand];
+
+  // Self-heal a stale bundled logo master in place (see flaudeIcon for the
+  // full rationale) so fixes to core-logos.json reach already-seeded files.
+  if (master && bundled && !opts.svg) {
+    const stamp = master.getPluginData(ICON_STAMP_KEY);
+    if (!stamp.startsWith(CUSTOM_STAMP_PREFIX) && stamp !== bundled.svg) {
+      reseedIconComponent(master, bundled.svg, `logo/${brand} \u00b7 ${bundled.name}`);
+      master.setPluginData(ICON_STAMP_KEY, bundled.svg);
+    }
+  }
+
+  if (!master) {
+    const svg = opts.svg ?? bundled?.svg;
+    const name = opts.name ?? bundled?.name;
+    if (!svg || !name) {
+      throw new Error(
+        `"${brand}" is not a bundled brand logo and no { svg, name } was given. ` +
+        `Bundled logos: ${Object.keys(CORE_LOGOS).join(', ')}. For a new brand, ` +
+        `source its SVG once and pass flaude.logo("${brand}", { svg, name, brandColor }) ` +
+        `— then add it to core-logos.json so it is SAVED for all users and never ` +
+        `re-sourced.`
+      );
+    }
+    const page = getOrCreateLogosPage();
+    const svgNode = figma.createNodeFromSvg(svg);
+    master = figma.createComponent();
+    master.name = `logo/${brand} \u00b7 ${name}`;
+    master.resize(svgNode.width, svgNode.height);
+    master.appendChild(svgNode);
+    svgNode.x = 0;
+    svgNode.y = 0;
+    page.appendChild(master);
+    master.setPluginData(ICON_STAMP_KEY, opts.svg ? `${CUSTOM_STAMP_PREFIX}${name}` : svg);
+  }
+
+  const inst = master.createInstance();
+  const size = opts.size ?? 24;
+  const aspect = master.width === 0 ? 1 : master.height / master.width;
+  inst.resize(size, Math.max(1, Math.round(size * aspect)));
+
+  // Fill: explicit color wins; otherwise brand color unless monochrome.
+  let fill: RGB | null = null;
+  if (opts.color) fill = opts.color;
+  else if (!opts.monochrome) {
+    const hex = opts.brandColor ?? bundled?.brandColor;
+    if (hex) fill = hexToRgb(hex);
+  }
+  if (fill) {
+    const color = fill;
+    const targets = [inst, ...inst.findAll(() => true)] as SceneNode[];
+    for (const node of targets) {
+      if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
+        (node as GeometryMixin).fills = node.fills.map((f) => (f.type === 'SOLID' ? { ...f, color } : f));
+      }
+      if ('strokes' in node && Array.isArray(node.strokes) && node.strokes.length > 0) {
+        (node as GeometryMixin).strokes = node.strokes.map((s) => (s.type === 'SOLID' ? { ...s, color } : s));
+      }
+    }
+  }
+  return inst;
+}
+
 async function seededComponent(id: string, label: string): Promise<ComponentNode> {
   // getNodeByIdAsync (not the sync getNodeById) is required for nodes on
   // pages that aren't currently loaded in dynamic-page documents.
@@ -286,6 +406,7 @@ export async function flaudeKeyboard(opts: FlaudeKeyboardOptions = {}): Promise<
  */
 export const flaudeHelpers = {
   icon: flaudeIcon,
+  logo: flaudeLogo,
   statusBar: flaudeStatusBar,
   homeIndicator: flaudeHomeIndicator,
   keyboard: flaudeKeyboard,
