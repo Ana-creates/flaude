@@ -51,6 +51,7 @@ import {
   REF_REGIONS_KEY,
   recordDiffResult,
   checkFidelityBar,
+  checkIosFont,
 } from '../tools/reference-tracking';
 import {
   recordFindings,
@@ -464,6 +465,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         lint.push(...checkReviewMissing(page));
         lint.push(...checkBuiltFromMemory(page));
         lint.push(...checkFidelityBar(page));
+        lint.push(...checkIosFont(page));
         if (lint.length > 0) {
           // Persist to the durable error ledger (fire-and-forget) so recurring
           // defects can later be analyzed and turned into new checks — the

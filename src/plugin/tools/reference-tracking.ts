@@ -425,3 +425,54 @@ export function checkFidelityBar(page: PageNode): FidelityBarFinding[] {
 
   return findings;
 }
+
+export interface IosFontFinding {
+  rule: 'ios-screen-wrong-font';
+  builtNodeId: string;
+  builtNodeName: string;
+  message: string;
+}
+
+/**
+ * Catch iOS screens built in a non-system font. iOS references render SF Pro;
+ * building the rebuild in Inter (the old flaude.row default) leaves a permanent
+ * ~5-6% pixel-diff floor on every text-dense screen and makes native chrome read
+ * subtly off \u2014 an error that recurred on EVERY iOS screen. Fires ONCE per built
+ * screen frame (with a REF sibling) when the majority of its text is a known
+ * non-system family. SF Pro / SF Compact are accepted; a brand wordmark is a
+ * small minority and won't trip the majority test.
+ */
+export function checkIosFont(page: PageNode): IosFontFinding[] {
+  const findings: IosFontFinding[] = [];
+  if (!page.children.some((c) => c.name.startsWith('REF /'))) return findings;
+  const NON_SYSTEM = /^(Inter|Roboto|Helvetica|Arial|Open Sans|Lato|Poppins)/i;
+  const SYSTEM = /^(SF Pro|SF Compact|\.SF|San Francisco)/i;
+
+  for (const child of page.children) {
+    if (child.type !== 'FRAME' && child.type !== 'COMPONENT') continue;
+    if (child.name.startsWith('REF /')) continue;
+    if (child.name.indexOf(' / ') === -1) continue;
+    if (!(child.width >= 333 && child.width <= 453 && child.height >= 700)) continue;
+
+    const texts = child.findAll((n) => n.type === 'TEXT') as TextNode[];
+    if (texts.length < 4) continue;
+    let nonSystem = 0;
+    let system = 0;
+    for (const t of texts) {
+      const fn = t.fontName;
+      if (fn === figma.mixed) continue;
+      const fam = (fn as FontName).family;
+      if (SYSTEM.test(fam)) system++;
+      else if (NON_SYSTEM.test(fam)) nonSystem++;
+    }
+    if (nonSystem > system && nonSystem >= texts.length * 0.5) {
+      findings.push({
+        rule: 'ios-screen-wrong-font',
+        builtNodeId: child.id,
+        builtNodeName: child.name,
+        message: `\u26a0\ufe0f WRONG FONT \u2014 "${child.name}" is an iOS screen but ${nonSystem}/${texts.length} text nodes use a non-system font (e.g. Inter). iOS references render SF Pro, leaving a permanent ~5-6% pixel-diff floor and text that reads subtly off. Rebuild text in "SF Pro Display"/"SF Pro Text" (flaude.row defaults to it now). Keep brand wordmarks as-is.`,
+      });
+    }
+  }
+  return findings;
+}

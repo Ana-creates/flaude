@@ -444,17 +444,29 @@ export interface FlaudeRowOptions {
  * the timestamp is pushed to the true right edge by layout math (not a typed x)
  * and handles/badges come only from explicit per-row data. */
 export async function flaudeListRow(opts: FlaudeRowOptions): Promise<FrameNode> {
-  const fam = opts.fontFamily ?? 'Inter';
-  for (const st of ['Regular', 'Medium', 'Semi Bold', 'Bold']) {
-    try { await figma.loadFontAsync({ family: fam, style: st }); } catch { /* fall back */ }
-  }
+  // Default to the real iOS system font. Building iOS screens in Inter (the old
+  // default) left a permanent ~5–6% pixel-diff floor vs SF Pro references and
+  // made native chrome read subtly "off" — an error on every screen. SF Pro
+  // Display is available in this environment; fall back to Inter if not.
+  let fam = opts.fontFamily ?? 'SF Pro Display';
+  const loadFam = async (family: string) => {
+    let okAny = false;
+    for (const st of ['Regular', 'Medium', 'Semibold', 'Bold']) {
+      try { await figma.loadFontAsync({ family, style: st }); okAny = true; } catch { /* skip missing weight */ }
+    }
+    return okAny;
+  };
+  if (!(await loadFam(fam))) { fam = 'Inter'; await loadFam(fam); }
+  // SF Pro uses "Semibold" (one word); Inter uses "Semi Bold". Normalize below.
+  const semibold = fam === 'Inter' ? 'Semi Bold' : 'Semibold';
   // `fill=true` makes the text stretch to its column and TRUNCATE with an
   // ellipsis instead of pushing the column wider than the row (which is what
   // clipped titles like "John, Wa"). Titles/subtitles in a growing column must
   // fill; a hugging label (time, badge) must not.
   const mk = (s: string, style: string, size: number, color: RGB, fill = false): TextNode => {
     const t = figma.createText();
-    t.fontName = { family: fam, style };
+    const st = style === 'Semi Bold' ? semibold : style;
+    t.fontName = { family: fam, style: st };
     t.fontSize = size;
     t.characters = s;
     t.fills = [{ type: 'SOLID', color }];
