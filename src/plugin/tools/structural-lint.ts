@@ -484,16 +484,31 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       // white action-button circles). Exclude those, and never descend into
       // component instances (keyboard keys, seeded chrome) — their internals are
       // never "missing avatars".
+      const isContentNode = (c: SceneNode): boolean =>
+        c.visible !== false &&
+        (c.type === 'INSTANCE' || c.type === 'VECTOR' || c.type === 'GROUP' ||
+         c.type === 'BOOLEAN_OPERATION' || c.type === 'TEXT' ||
+         (('fills' in c) && Array.isArray((c as GeometryMixin).fills) &&
+           (c as GeometryMixin).fills !== figma.mixed &&
+           ((c as GeometryMixin).fills as readonly Paint[]).some((fp) => fp.type === 'IMAGE')));
       const hasContentChild =
-        'children' in node &&
-        (node as ChildrenMixin).children.some(
-          (c) => c.visible !== false &&
-            (c.type === 'INSTANCE' || c.type === 'VECTOR' || c.type === 'GROUP' ||
-             c.type === 'BOOLEAN_OPERATION' || c.type === 'TEXT' ||
-             (('fills' in c) && Array.isArray((c as GeometryMixin).fills) &&
-               (c as GeometryMixin).fills !== figma.mixed &&
-               ((c as GeometryMixin).fills as readonly Paint[]).some((fp) => fp.type === 'IMAGE')))
-        );
+        'children' in node && (node as ChildrenMixin).children.some(isContentNode);
+      // A flat circle/box with a glyph SIBLING centered ON it is a BUTTON (the
+      // icon is layered over the circle, not parented into it), not an empty
+      // avatar — e.g. the white Tinder action-button circles and the verified-
+      // badge base. Detect a content sibling whose center sits within this
+      // shape's bounds, reusing the same center-containment test as the
+      // centering rule. This is why these must not fire avatar-placeholder.
+      const cx0 = sceneNode.x, cy0 = sceneNode.y;
+      const hasGlyphSiblingOnTop = (() => {
+        const par = node.parent;
+        if (!par || !('children' in par)) return false;
+        return (par as ChildrenMixin).children.some((c) => {
+          if (c === sceneNode || !isContentNode(c) || !('width' in c)) return false;
+          const scx = c.x + c.width / 2, scy = c.y + c.height / 2;
+          return scx >= cx0 && scx <= cx0 + w && scy >= cy0 && scy <= cy0 + h;
+        });
+      })();
       if (
         pageHasRefFrames &&
         !isInsideInstance(node) &&
@@ -503,7 +518,8 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         hasFlatSolidFill(sceneNode) &&
         !hasCenteredInitials(sceneNode) &&
         !inPhotoComposite &&
-        !hasContentChild
+        !hasContentChild &&
+        !hasGlyphSiblingOnTop
       ) {
         findings.push({
           rule: 'avatar-placeholder',
@@ -929,7 +945,14 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       }
     }
 
-    if ('children' in node) {
+    // Do NOT descend into component INSTANCES. Their internals (keyboard keys,
+    // seeded status-bar/nav glyphs, icon vectors) are the component's concern,
+    // never a screen-level defect — recursing into them produced false-positive
+    // storms (26 keyboard keys as "ungrouped-label-over-shape", keys as
+    // "avatar-placeholder"). Screen-level rules only apply to nodes the builder
+    // placed directly. (Individual rules keep their own isInsideInstance guards
+    // as defense-in-depth, but stopping traversal here is the real fix.)
+    if ('children' in node && node.type !== 'INSTANCE') {
       for (const child of node.children) visit(child, depth + 1);
     }
   }
