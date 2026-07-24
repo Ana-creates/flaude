@@ -237,6 +237,36 @@ function nearSquare(width: number, height: number): boolean {
   return ratio > 0.75 && ratio < 1.34;
 }
 
+/** Absolute-coordinate INK bounds of a glyph: the union of its rendered leaf
+ * geometry (absoluteRenderBounds preferred — the true visual extent incl.
+ * strokes — else absoluteBoundingBox). For a leaf, its own bounds. This is what
+ * lets the centering check judge where the VISIBLE mark actually sits, not where
+ * its (possibly padding-heavy) bounding box sits. Returns null if nothing
+ * measurable. */
+function inkBoundsAbs(node: SceneNode): { x: number; y: number; w: number; h: number } | null {
+  const leaves: SceneNode[] = [];
+  const collect = (n: SceneNode, depth: number) => {
+    if (depth > 6) return;
+    if ('visible' in n && n.visible === false) return;
+    if ('children' in n && (n as ChildrenMixin).children.length > 0) {
+      for (const c of (n as ChildrenMixin).children as readonly SceneNode[]) collect(c, depth + 1);
+    } else {
+      leaves.push(n);
+    }
+  };
+  collect(node, 0);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const g of leaves) {
+    const rb = 'absoluteRenderBounds' in g ? (g as { absoluteRenderBounds: Rect | null }).absoluteRenderBounds : null;
+    const b = rb ?? ('absoluteBoundingBox' in g ? (g as { absoluteBoundingBox: Rect | null }).absoluteBoundingBox : null);
+    if (!b) continue;
+    x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y);
+    x1 = Math.max(x1, b.x + b.width); y1 = Math.max(y1, b.y + b.height);
+  }
+  if (!isFinite(x0)) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 function hasImageFill(node: SceneNode): boolean {
   if (!('fills' in node)) return false;
   const fills = (node as GeometryMixin).fills;
@@ -379,24 +409,29 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           }
         }
         if (container) {
-          const isParent = container === parent;
-          // for a parent container the glyph x/y are relative to it; for a
-          // sibling they share the same coordinate space — normalize both to the
-          // glyph-vs-container center offset.
-          const ccx = isParent ? container.width / 2 : container.x + container.width / 2;
-          const ccy = isParent ? container.height / 2 : container.y + container.height / 2;
-          const gcx = isParent ? w / 2 + sceneNode.x : icx;
-          const gcy = isParent ? h / 2 + sceneNode.y : icy;
-          const offX = Math.abs(gcx - ccx);
-          const offY = Math.abs(gcy - ccy);
-          const tol = Math.max(4, container.width * 0.14);
-          if (offX > tol || offY > tol) {
-            findings.push({
-              rule: 'glyph-not-centered-in-container',
-              nodeId: sceneNode.id,
-              nodeName: sceneNode.name,
-              message: `Glyph "${sceneNode.name}" is off-center inside its ${container.width}×${container.height} ${container.type.toLowerCase()} by (${Math.round(offX)}, ${Math.round(offY)})px — tolerance ${Math.round(tol)}px. Icons inside buttons/circles must be centered: set the glyph x = container center − glyph.width/2 and y = container center − glyph.height/2. (This is a defect the eye slides past but is obvious once measured.)`,
-            });
+          // Compare INK centers in ABSOLUTE coords. Two reasons: (1) absolute
+          // coords sidestep parent-vs-sibling coordinate spaces; (2) using the
+          // glyph's INK (inkBoundsAbs = union of its rendered geometry) instead
+          // of its bounding box catches an icon whose box is centered but whose
+          // visible mark sits off — e.g. the chevron-up whose ink is padded
+          // asymmetrically inside its 20px box, so it reads low even though the
+          // box is dead-centered. The bounding box hid that; the ink exposes it.
+          const cb = container.absoluteBoundingBox;
+          const ink = inkBoundsAbs(sceneNode);
+          if (cb && ink && ink.w > 0 && ink.h > 0) {
+            const ccx = cb.x + cb.width / 2, ccy = cb.y + cb.height / 2;
+            const gcx = ink.x + ink.w / 2, gcy = ink.y + ink.h / 2;
+            const offX = Math.abs(gcx - ccx);
+            const offY = Math.abs(gcy - ccy);
+            const tol = Math.max(3, container.width * 0.1);
+            if (offX > tol || offY > tol) {
+              findings.push({
+                rule: 'glyph-not-centered-in-container',
+                nodeId: sceneNode.id,
+                nodeName: sceneNode.name,
+                message: `Glyph "${sceneNode.name}" is off-center inside its ${Math.round(container.width)}×${Math.round(container.height)} ${container.type.toLowerCase()} — its visible INK center is (${Math.round(offX)}, ${Math.round(offY)})px off the container center (tolerance ${Math.round(tol)}px). This includes icons whose bounding box is centered but whose ARTWORK has uneven padding (they look off even though the box is centered). Nudge the glyph so its ink — not its box — centers: shift it by (${Math.round(ccx - gcx)}, ${Math.round(ccy - gcy)})px.`,
+              });
+            }
           }
         }
       }
