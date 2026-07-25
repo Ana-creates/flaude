@@ -50,6 +50,7 @@ import {
   checkBuiltFromMemory,
   REF_REGIONS_KEY,
   recordDiffResult,
+  getPairVerdict,
   checkFidelityBar,
   checkIosFont,
 } from '../tools/reference-tracking';
@@ -591,6 +592,44 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // what to fix, don't call it done until it's clean" gate — the front half of
   // the auto-improvement loop. (Deterministic/structural only; the vision
   // judgment layer — "the gear should be a bell" — is a separate phase.)
+  // build_flow_scan: gather everything the server-side build_flow orchestrator
+  // needs to decide the next action, in ONE call — the REF/built pairings on
+  // the current page, each pair's recorded pixel-diff verdict, and the
+  // structural lint scoped to each built node. The orchestrator (Pro) turns
+  // this into a binding "work on screen X next / you're complete" state, so
+  // "iterate until it matches" is enforced by code, not agent willpower.
+  build_flow_scan: async () => {
+    const page = figma.currentPage;
+    const pageHasRefFrames = page.children.some((n) => n.name.startsWith('REF /'));
+    const refs = new Map<string, { id: string }>();
+    for (const c of page.children) {
+      if (c.name.startsWith('REF /')) refs.set(c.name.slice('REF /'.length).trim(), { id: c.id });
+    }
+    const builtByScreen = new Map<string, SceneNode>();
+    for (const c of page.children) {
+      if (c.name.startsWith('REF /')) continue;
+      const sep = c.name.indexOf(' / ');
+      if (sep === -1) continue;
+      builtByScreen.set(c.name.slice(sep + 3).trim(), c as SceneNode);
+    }
+    const pairs = [];
+    for (const [screenName, ref] of refs) {
+      const built = builtByScreen.get(screenName) ?? null;
+      const verdict = built ? getPairVerdict(`${ref.id}::${built.id}`) : null;
+      const lint = built ? runStructuralLint(built, pageHasRefFrames) : [];
+      pairs.push({
+        screenName,
+        refNodeId: ref.id,
+        builtNodeId: built ? built.id : null,
+        diff: verdict,
+        lint: (lint as unknown as Array<{ rule: string; nodeName?: string; message?: string }>).map((f) => ({
+          rule: String(f.rule), nodeName: String(f.nodeName ?? ''), message: String(f.message ?? ''),
+        })),
+      });
+    }
+    return { pairs };
+  },
+
   review_screen: async (params) => {
     const nodeId = params.nodeId as string | undefined;
     if (!nodeId) throw new Error('review_screen requires a `nodeId` (the built screen to review)');

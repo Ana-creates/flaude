@@ -70,6 +70,13 @@ export function recordDiffResult(pairKey: string, mismatch: number, pass: boolea
   pairVerdict.set(pairKey, { mismatch, pass });
 }
 
+/** Read back the last recorded pixel-diff verdict for a pair (or null if never
+ * diffed this session). Used by build_flow_scan so the orchestrator can decide
+ * a screen's status without re-running the diff. */
+export function getPairVerdict(pairKey: string): { mismatch: number; pass: boolean } | null {
+  return pairVerdict.get(pairKey) ?? null;
+}
+
 // Root cause (this session): 20 app screens were built and called "done"
 // while ~80% were placeholder-fidelity — flat gradient tiles where the
 // reference showed real imagery (Pinterest board collages), solid-color
