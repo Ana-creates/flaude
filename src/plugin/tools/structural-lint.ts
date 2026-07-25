@@ -732,7 +732,21 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       //    needed to know it's wrong. Only solid-on-solid is judged;
       //    image/gradient/mixed backgrounds are skipped since a flat contrast
       //    ratio can't be computed there.
-      if (node.type === 'TEXT' && !isInsideInstance(node)) {
+      // DISABLED controls are exempt: WCAG itself excludes inactive UI from
+      // contrast minimums, and real apps render disabled CTAs as washed-out
+      // text on a tinted pill (observed: Revolut's lilac 'Send' at ~1.4:1 in
+      // the actual reference). Exemption is by DECLARED intent — the builder
+      // names the button/container '…disabled…' — so ordinary unreadable text
+      // still fires.
+      const inDisabledControl = (n: SceneNode): boolean => {
+        let cur: BaseNode | null = n;
+        for (let i = 0; i < 3 && cur; i++) {
+          if (/disabled/i.test(cur.name)) return true;
+          cur = cur.parent;
+        }
+        return false;
+      };
+      if (node.type === 'TEXT' && !isInsideInstance(node) && !inDisabledControl(sceneNode)) {
         const textColor = firstSolidFill(sceneNode);
         if (textColor) {
           const bg = backgroundColorBehind(sceneNode);
