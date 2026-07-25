@@ -132,6 +132,16 @@ function backgroundColorBehind(text: SceneNode): RGB | null {
           );
           // Fully transparent shape doesn't actually occlude — keep looking behind it.
           if (visible.length === 0) continue;
+          // TRANSLUCENT glass panel: it neither occludes what's behind it nor
+          // supplies a flat backdrop, so no honest WCAG ratio exists — the
+          // real backdrop is (panel tint ⊕ whatever it floats over). Treating
+          // its raw fill colour as opaque produced the exact false positive
+          // white label on a white@10% glass card over a colourful gradient
+          // reported as 1.00:1 "invisible" when it is plainly readable.
+          // Same reasoning as the gradient/image case just below: skip.
+          const topOpacity = visible[visible.length - 1].opacity;
+          const nodeOpacity = 'opacity' in s ? (s as SceneNode & { opacity: number }).opacity : 1;
+          if ((topOpacity !== undefined && topOpacity < 0.5) || nodeOpacity < 0.5) return null;
           // A visible but non-solid background (gradient / image) can't be
           // reduced to one flat color, so a WCAG ratio is meaningless against
           // it — return null to SKIP the contrast check rather than falling
@@ -149,8 +159,21 @@ function backgroundColorBehind(text: SceneNode): RGB | null {
   let hops = 0;
   while (ancestor && hops < 6) {
     if ('fills' in ancestor) {
-      const c = firstSolidFill(ancestor as SceneNode);
-      if (c) return c;
+      const af = (ancestor as GeometryMixin).fills;
+      if (af !== figma.mixed && Array.isArray(af)) {
+        const visible = af.filter(
+          (f) => f.visible !== false && (f.opacity === undefined || f.opacity > 0.1)
+        );
+        if (visible.length > 0) {
+          // The NEAREST painted ancestor decides. If its paint is a gradient
+          // or image, contrast is unknowable — STOP with null rather than
+          // walking past it to a farther solid ancestor. That fall-through was
+          // a real bug: dark headline text on a hero GRADIENT tile reported
+          // 1.19:1 "invisible" because the walk skipped the gradient and
+          // compared against the poster's black root frame.
+          return firstSolidFill(ancestor as SceneNode);
+        }
+      }
     }
     ancestor = 'parent' in ancestor ? ancestor.parent : null;
     hops++;
@@ -287,7 +310,7 @@ function hasImageFill(node: SceneNode): boolean {
  */
 function adjacentSides(
   node: SceneNode,
-  opts: { imageOnly?: boolean; sizeRatioMax?: number; selfArea?: number } = {}
+  opts: { imageOnly?: boolean; sizeRatioMax?: number; selfArea?: number; tilesOnly?: boolean } = {}
 ): { above: boolean; below: boolean; left: boolean; right: boolean } {
   const out = { above: false, below: false, left: false, right: false };
   const parent = node.parent;
@@ -298,6 +321,13 @@ function adjacentSides(
   for (const s of parent.children as readonly SceneNode[]) {
     if (s === node || !('width' in s)) continue;
     if (opts.imageOnly && !hasImageFill(s)) continue;
+    // A composite TILE's neighbours are other tiles — surfaces. A text line or a
+    // loose vector that merely happens to sit within the gutter is not a tile,
+    // so it must not make a floating card look like a grid cell (observed: a
+    // floating overlay card on a reading panel flagged because a body-copy TEXT
+    // line ran alongside it).
+    if (opts.tilesOnly && s.type !== 'RECTANGLE' && s.type !== 'FRAME' &&
+        s.type !== 'ELLIPSE' && s.type !== 'INSTANCE' && s.type !== 'COMPONENT') continue;
     // Optional size-similarity filter: a real tile neighbour is comparably
     // sized. Skips a small floating control sitting near a big hero element
     // (e.g. action buttons under a full-bleed card photo) being mistaken for a
@@ -423,6 +453,29 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
             }
           }
         }
+        // A LABEL BLOCK is not a centered glyph. Centering only makes sense for
+        // a single mark (avatar initials, an icon) — two text nodes cannot both
+        // occupy the container's center, so if another TEXT sibling also sits
+        // inside this container it's a deliberately laid-out caption (observed:
+        // a two-line card caption pinned bottom-left) and the rule must not fire.
+        if (container && node.type === 'TEXT' && parent && 'children' in parent) {
+          // Compare in ABSOLUTE space: when the container IS the parent, sibling
+          // coords are parent-relative while container.x/y are grandparent-
+          // relative, so mixing the two silently never matches.
+          const cAbs = container.absoluteBoundingBox;
+          let textsInContainer = 0;
+          if (cAbs) {
+            for (const sib of (parent as ChildrenMixin).children as readonly SceneNode[]) {
+              if (sib.type !== 'TEXT') continue;
+              const sAbs = sib.absoluteBoundingBox;
+              if (!sAbs) continue;
+              const sx = sAbs.x + sAbs.width / 2, sy = sAbs.y + sAbs.height / 2;
+              if (sx >= cAbs.x && sx <= cAbs.x + cAbs.width &&
+                  sy >= cAbs.y && sy <= cAbs.y + cAbs.height) textsInContainer++;
+            }
+          }
+          if (textsInContainer > 1) container = null;
+        }
         if (container) {
           // Compare INK centers in ABSOLUTE coords. Two reasons: (1) absolute
           // coords sidestep parent-vs-sibling coordinate spaces; (2) using the
@@ -484,7 +537,19 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
       //    instance of the real seeded/bundled component. Bare TEXT nodes are
       //    excluded — a full-width page-title label is never chrome, and a
       //    tight height match alone isn't enough to rule that out.
-      if (node.type !== 'TEXT' && !isInsideInstance(node)) {
+      // iOS-chrome dimensions only mean anything on a PHONE-SIZED screen
+      // frame. On a 1080x1350 marketing poster a 140x3 chart axis matches
+      // "home indicator" numbers by pure coincidence — so require the node's
+      // top-level frame to have phone proportions before dimension-matching.
+      const phoneSized = (() => {
+        let screen: SceneNode | null = sceneNode;
+        while (screen && screen.parent && screen.parent.type !== 'PAGE') {
+          screen = screen.parent as SceneNode;
+        }
+        if (!screen || !('width' in screen)) return false;
+        return screen.width >= 320 && screen.width <= 500 && screen.height / screen.width >= 1.5;
+      })();
+      if (node.type !== 'TEXT' && !isInsideInstance(node) && phoneSized) {
         for (const chrome of IOS_CHROME_DIMENSIONS) {
           if (
             within(w, chrome.width, chrome.widthTolerance) &&
@@ -561,6 +626,13 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         c.visible !== false &&
         (c.type === 'INSTANCE' || c.type === 'VECTOR' || c.type === 'GROUP' ||
          c.type === 'BOOLEAN_OPERATION' || c.type === 'TEXT' ||
+         // figma.createNodeFromSvg() — the standard way to add an icon — returns
+         // a FRAME wrapping vectors, so an icon-in-a-button read as "empty"
+         // and fired avatar-placeholder on every such button. A FRAME/COMPONENT
+         // counts as content only when it actually HAS children, so a genuinely
+         // empty placeholder frame still fires.
+         ((c.type === 'FRAME' || c.type === 'COMPONENT') &&
+           'children' in c && (c as ChildrenMixin).children.length > 0) ||
          (('fills' in c) && Array.isArray((c as GeometryMixin).fills) &&
            (c as GeometryMixin).fills !== figma.mixed &&
            ((c as GeometryMixin).fills as readonly Paint[]).some((fp) => fp.type === 'IMAGE')));
@@ -596,7 +668,13 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
         // A flat circle inside a promo/banner/card container is a decorative
         // element (a camera-lens icon, a status dot), not a missing avatar — the
         // container name says it's not an avatar slot.
-        !(node.parent && /promo|banner|card|badge|chip/i.test(node.parent.name))
+        !(node.parent && /promo|banner|card|badge|chip/i.test(node.parent.name)) &&
+        // A DECLARED UI CONTROL is not an avatar slot. Slider knobs, colour-picker
+        // handles, carousel dots and toggle thumbs are *correctly* flat solid
+        // circles — that is what the real control looks like, so demanding a
+        // "real asset" here is always wrong. Exemption is by declared intent
+        // (the builder names the node), so genuine unnamed placeholders still fire.
+        !/knob|handle|thumb|slider|indicator|\bdot\b|bullet|cursor|pointer/i.test(sceneNode.name)
       ) {
         findings.push({
           rule: 'avatar-placeholder',
@@ -626,9 +704,34 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           // Tinder card photo "touching" the action-button circles). Require
           // the adjacent tile's area to be within 4x of this one.
           const areaSelf = w * h;
+          // A receding STACK (cards overlapping card-on-card, like a depth
+          // deck) is not a tiled grid, even when two non-consecutive cards
+          // happen to sit a hairline apart — the card between them overlaps
+          // both. Grid tiles never overlap; stacks always do. So if this node
+          // overlaps any comparable-size sibling by >20%, skip the rule.
+          const overlapsComparableSibling = (() => {
+            const parent = sceneNode.parent;
+            if (!parent || !('children' in parent)) return false;
+            for (const s of parent.children as readonly SceneNode[]) {
+              if (s === sceneNode || !('width' in s)) continue;
+              if (s.type !== 'RECTANGLE' && s.type !== 'FRAME') continue;
+              const sArea = s.width * s.height;
+              if (sArea <= 0) continue;
+              const ratio = Math.max(sArea / areaSelf, areaSelf / sArea);
+              if (ratio > 4) continue;
+              const ox = Math.min(sceneNode.x + w, s.x + s.width) - Math.max(sceneNode.x, s.x);
+              const oy = Math.min(sceneNode.y + h, s.y + s.height) - Math.max(sceneNode.y, s.y);
+              if (ox > 0 && oy > 0 && (ox * oy) / Math.min(areaSelf, sArea) > 0.2) return true;
+            }
+            return false;
+          })();
+          if (overlapsComparableSibling) {
+            // stack, not grid — rounding every card is correct here
+          } else {
           const adj = adjacentSides(sceneNode, {
             sizeRatioMax: 4,
             selfArea: areaSelf,
+            tilesOnly: true,
           });
           const fixes: string[] = [];
           if ((adj.above || adj.left) && tl > 0.5) fixes.push('topLeftRadius');
@@ -642,6 +745,7 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
               nodeName: sceneNode.name,
               message: `Tile "${sceneNode.name}" sits in a tiled composite (touches a sibling within an 8px gutter) but still rounds INNER corner(s) that face a neighbour: ${fixes.join(', ')}. A composite rounds ONLY its outer boundary — seams between tiles are square. FIX: set ${fixes.map((k) => `${k}=0`).join('; ')} on "${sceneNode.name}" (keep the outer corners at their current radius).`,
             });
+          }
           }
         }
       }
