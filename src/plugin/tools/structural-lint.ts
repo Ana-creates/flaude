@@ -43,8 +43,12 @@ const IOS_CHROME_DIMENSIONS: Array<{
   height: number;
   widthTolerance: number;
   heightTolerance: number;
+  /** Chrome that only ever docks at the SCREEN BOTTOM (the keyboard). A
+   * same-size rectangle at the top is a header/hero background, not chrome, so
+   * the dimension match alone must not fire — it must also sit at the bottom. */
+  dockedBottom?: boolean;
 }> = [
-  { label: 'iOS keyboard', width: 402, height: 225, widthTolerance: 20, heightTolerance: 15 },
+  { label: 'iOS keyboard', width: 402, height: 225, widthTolerance: 20, heightTolerance: 15, dockedBottom: true },
   { label: 'iOS status bar', width: 390, height: 44, widthTolerance: 20, heightTolerance: 6 },
   { label: 'iOS status bar', width: 393, height: 44, widthTolerance: 20, heightTolerance: 6 },
   { label: 'iOS home indicator pill', width: 134, height: 5, widthTolerance: 10, heightTolerance: 3 },
@@ -486,6 +490,29 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
             within(w, chrome.width, chrome.widthTolerance) &&
             within(h, chrome.height, chrome.heightTolerance)
           ) {
+            // Docked-bottom chrome (the keyboard) only counts when the node
+            // actually sits at the bottom of the screen. A same-size rectangle
+            // at the TOP is a header/hero background, not a hand-drawn keyboard
+            // — position is the discriminator that kills that false positive.
+            if (chrome.dockedBottom) {
+              // `root` is NOT reliably the screen frame — runStructuralLint is
+              // also called with the whole PAGE as root (the blanket _lint
+              // path on every figma_execute), and a PageNode has no
+              // absoluteBoundingBox, which silently no-op'd this guard. Walk
+              // UP from the node itself to its top-level screen-frame ancestor
+              // (the direct child of the page) and use THAT frame's bounds —
+              // this works regardless of what root the caller passed in.
+              let screen: SceneNode | null = sceneNode;
+              while (screen && screen.parent && screen.parent.type !== 'PAGE') {
+                screen = screen.parent as SceneNode;
+              }
+              const rb = screen?.absoluteBoundingBox ?? null;
+              const nb = sceneNode.absoluteBoundingBox;
+              if (rb && nb && rb.height > 0) {
+                const bottomGap = (rb.y + rb.height) - (nb.y + nb.height);
+                if (bottomGap > SAFE_AREA_INSET + 24) continue;
+              }
+            }
             findings.push({
               rule: 'hand-drawn-ios-chrome',
               nodeId: sceneNode.id,

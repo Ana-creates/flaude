@@ -63,18 +63,74 @@ const pairVerdict = new Map<string, { mismatch: number; pass: boolean }>();
  * here, so the two can't disagree on the verdict. */
 const FIDELITY_BAR_PCT = 8;
 
-/** Record a real pixel-diff RESULT (not just that it ran) for a pair. Called by
- * the record_diff_result command that Pro invokes after compareImages. */
-export function recordDiffResult(pairKey: string, mismatch: number, pass: boolean): void {
-  comparedPairKeys.add(pairKey);
-  pairVerdict.set(pairKey, { mismatch, pass });
+// ---- DURABLE state: the DOCUMENT is the source of truth. ----------------
+// Root cause: verdicts/review passes lived only in this Map — wiped on every
+// plugin reload (which first-time users do constantly) and invisible after
+// reopening a file, silently regressing passing screens to "not-diffed" and
+// re-running work. Stamping the verdict as pluginData ON THE BUILT FRAME makes
+// it survive plugin reloads, server restarts, and file close/reopen. The
+// stamped value records WHICH ref it was diffed against, so a re-pairing with
+// a different REF frame can never inherit a stale verdict.
+const PAIR_VERDICT_KEY = 'flaude:pairVerdict';
+const REVIEW_PASS_KEY = 'flaude:reviewPass';
+
+interface DurableVerdict {
+  refNodeId: string;
+  mismatch: number;
+  pass: boolean;
+  /** Every mismatch this pair has diffed at, in order — feeds build_flow's
+   * honest-floor detection without depending on server memory. */
+  history: number[];
 }
 
-/** Read back the last recorded pixel-diff verdict for a pair (or null if never
- * diffed this session). Used by build_flow_scan so the orchestrator can decide
- * a screen's status without re-running the diff. */
-export function getPairVerdict(pairKey: string): { mismatch: number; pass: boolean } | null {
-  return pairVerdict.get(pairKey) ?? null;
+/** Record a real pixel-diff RESULT (not just that it ran) for a pair. Called by
+ * the record_diff_result command that Pro invokes after compareImages.
+ * Also stamps the verdict durably onto the built frame (see above). */
+export async function recordDiffResult(pairKey: string, mismatch: number, pass: boolean): Promise<void> {
+  comparedPairKeys.add(pairKey);
+  pairVerdict.set(pairKey, { mismatch, pass });
+  const [refNodeId, builtNodeId] = pairKey.split('::');
+  try {
+    const built = await figma.getNodeByIdAsync(builtNodeId);
+    if (built && 'setPluginData' in built) {
+      const prev = readDurableVerdict(built as SceneNode);
+      const history = prev && prev.refNodeId === refNodeId ? [...prev.history, mismatch] : [mismatch];
+      const durable: DurableVerdict = { refNodeId, mismatch, pass, history: history.slice(-10) };
+      (built as SceneNode).setPluginData(PAIR_VERDICT_KEY, JSON.stringify(durable));
+    }
+  } catch {
+    // best-effort: memory verdict above is still authoritative this session
+  }
+}
+
+function readDurableVerdict(node: SceneNode): DurableVerdict | null {
+  try {
+    const raw = node.getPluginData(PAIR_VERDICT_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as DurableVerdict;
+    if (typeof v.mismatch !== 'number' || typeof v.pass !== 'boolean' || !v.refNodeId) return null;
+    return { ...v, history: Array.isArray(v.history) ? v.history : [v.mismatch] };
+  } catch {
+    return null;
+  }
+}
+
+/** Read back the last recorded pixel-diff verdict for a pair. Memory first
+ * (authoritative this session), then the durable stamp on the built frame —
+ * but ONLY if it was recorded against the SAME ref node, so a stale stamp
+ * can't leak across re-pairings. Pass the built node when you have it (the
+ * build_flow scan does) to enable the durable fallback. */
+export function getPairVerdict(
+  pairKey: string,
+  builtNode?: SceneNode
+): { mismatch: number; pass: boolean; history?: number[] } | null {
+  const mem = pairVerdict.get(pairKey);
+  const [refNodeId] = pairKey.split('::');
+  const durable = builtNode ? readDurableVerdict(builtNode) : null;
+  const durableOk = durable && durable.refNodeId === refNodeId ? durable : null;
+  if (mem) return { ...mem, history: durableOk?.history };
+  if (durableOk) return { mismatch: durableOk.mismatch, pass: durableOk.pass, history: durableOk.history };
+  return null;
 }
 
 // Root cause (this session): 20 app screens were built and called "done"
@@ -93,9 +149,34 @@ const reviewedPairKeys = new Set<string>();
  * Set ONLY by the `record_review_pass` command (which the review orchestration
  * calls after the reviewer ran and its fixes were applied / it returned
  * MATCH) — never by a plain screenshot. This is what clears the
- * `built-without-review` gate for a screen. */
-export function recordReviewMarker(pairKey: string): void {
+ * `built-without-review` gate for a screen. Stamped durably on the built
+ * frame for the same reload-survival reason as the diff verdict. */
+export async function recordReviewMarker(pairKey: string): Promise<void> {
   reviewedPairKeys.add(pairKey);
+  const [refNodeId, builtNodeId] = pairKey.split('::');
+  try {
+    const built = await figma.getNodeByIdAsync(builtNodeId);
+    if (built && 'setPluginData' in built) {
+      (built as SceneNode).setPluginData(REVIEW_PASS_KEY, JSON.stringify({ refNodeId }));
+    }
+  } catch {
+    // best-effort: memory marker above still covers this session
+  }
+}
+
+/** Read back whether a recorded visual review->fix pass exists for a pair —
+ * memory first, then the durable stamp (same-ref-only, like getPairVerdict). */
+export function isPairReviewed(pairKey: string, builtNode?: SceneNode): boolean {
+  if (reviewedPairKeys.has(pairKey)) return true;
+  if (!builtNode) return false;
+  try {
+    const raw = builtNode.getPluginData(REVIEW_PASS_KEY);
+    if (!raw) return false;
+    const [refNodeId] = pairKey.split('::');
+    return (JSON.parse(raw) as { refNodeId?: string }).refNodeId === refNodeId;
+  } catch {
+    return false;
+  }
 }
 
 /** pluginData key on a REF frame holding its deterministically-measured
@@ -441,7 +522,7 @@ export function checkFidelityBar(page: PageNode): FidelityBarFinding[] {
     const ref = refByScreenName.get(child.name.slice(sep + 3).trim());
     if (!ref) continue;
 
-    const v = pairVerdict.get(`${ref.id}::${child.id}`);
+    const v = getPairVerdict(`${ref.id}::${child.id}`, child as SceneNode);
     if (v && !v.pass) {
       findings.push({
         rule: 'built-below-fidelity-bar',

@@ -51,6 +51,7 @@ import {
   REF_REGIONS_KEY,
   recordDiffResult,
   getPairVerdict,
+  isPairReviewed,
   checkFidelityBar,
   checkIosFont,
 } from '../tools/reference-tracking';
@@ -117,13 +118,13 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // pair. The review orchestration calls this ONLY after the visual reviewer
   // has run and its fixes were applied (or it returned MATCH) — never on a bare
   // screenshot — so the gate reflects an actual review→fix pass, not intent.
-  record_review_pass: (params) => {
+  record_review_pass: async (params) => {
     const refNodeId = params.refNodeId as string;
     const builtNodeId = params.builtNodeId as string;
     if (!refNodeId || !builtNodeId) {
       throw new Error('`refNodeId` and `builtNodeId` are both required');
     }
-    recordReviewMarker(`${refNodeId}::${builtNodeId}`);
+    await recordReviewMarker(`${refNodeId}::${builtNodeId}`);
     return { ok: true, verdict: (params.verdict as string) ?? null };
   },
 
@@ -135,7 +136,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   // compare_to_reference tool after compareImages computes the binding verdict,
   // so the plugin's checkFidelityBar lint keeps a FAILED screen "not done"
   // until the pixels actually match the reference. Verdict is code, not opinion.
-  record_diff_result: (params) => {
+  record_diff_result: async (params) => {
     const refNodeId = params.refNodeId as string;
     const builtNodeId = params.builtNodeId as string;
     const mismatch = params.mismatch as number;
@@ -143,7 +144,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     if (!refNodeId || !builtNodeId || typeof mismatch !== 'number' || typeof pass !== 'boolean') {
       throw new Error('`refNodeId`, `builtNodeId`, numeric `mismatch`, boolean `pass` all required');
     }
-    recordDiffResult(`${refNodeId}::${builtNodeId}`, mismatch, pass);
+    await recordDiffResult(`${refNodeId}::${builtNodeId}`, mismatch, pass);
     return { ok: true, pass, mismatch };
   },
 
@@ -620,17 +621,53 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
       if (sep === -1) continue;
       builtByScreen.set(norm(c.name.slice(sep + 3)), c as SceneNode);
     }
+    // A build carrying a LARGE irreproducible-art region (a justified
+    // flaude.crop of brand illustration/poster/ai-art, or a big sourced
+    // flaude.image photo) has an inherent pixel-diff FLOOR in that region:
+    // cropped art resampled into a differently-sized node, or a different real
+    // photo, can never reach the <8% bar however faithful the rebuild. Such a
+    // screen must be judged by the reviewer, not the literal pixel bar — the
+    // same reason name-detected photo screens are review-gated, but detected
+    // from the BUILD so it also catches art the screen NAME doesn't advertise
+    // (e.g. a "Home" dashboard with a full-width brand banner). Threshold: the
+    // art covers >8% of the frame area.
+    const hasLargeIrreproducibleArt = (node: SceneNode): boolean => {
+      if (!('findAll' in node) || !('width' in node)) return false;
+      const frameArea = node.width * node.height;
+      if (frameArea <= 0) return false;
+      const candidates: SceneNode[] = [node, ...(node as FrameNode).findAll(() => true)];
+      for (const n of candidates) {
+        if (!('getPluginData' in n) || !('width' in n)) continue;
+        const isJustifiedCrop =
+          n.getPluginData('flaude:refCrop') === 'true' &&
+          !!n.getPluginData('flaude:refCropReason') &&
+          n.getPluginData('flaude:refCropReason') !== 'UNJUSTIFIED';
+        const isRealPhoto = n.getPluginData('flaude:realImage') === 'true';
+        if ((isJustifiedCrop || isRealPhoto) && (n.width * n.height) / frameArea > 0.08) {
+          return true;
+        }
+      }
+      return false;
+    };
     const pairs = [];
     for (const [key, ref] of refs) {
       const screenName = ref.display;
       const built = builtByScreen.get(key) ?? null;
-      const verdict = built ? getPairVerdict(`${ref.id}::${built.id}`) : null;
+      const verdict = built ? getPairVerdict(`${ref.id}::${built.id}`, built as SceneNode) : null;
+      const reviewed = built ? isPairReviewed(`${ref.id}::${built.id}`, built as SceneNode) : false;
+      const photoDense = built ? hasLargeIrreproducibleArt(built) : false;
       const lint = built ? runStructuralLint(built, pageHasRefFrames) : [];
       pairs.push({
         screenName,
         refNodeId: ref.id,
         builtNodeId: built ? built.id : null,
-        diff: verdict,
+        diff: verdict ? { mismatch: verdict.mismatch, pass: verdict.pass } : null,
+        // Durable per-pair mismatch history (stamped on the built frame), so
+        // build_flow's honest-floor detection survives plugin reloads AND
+        // server restarts — the document is the source of truth.
+        diffHistory: verdict?.history ?? null,
+        reviewed,
+        photoDense,
         lint: (lint as unknown as Array<{ rule: string; nodeName?: string; message?: string }>).map((f) => ({
           rule: String(f.rule), nodeName: String(f.nodeName ?? ''), message: String(f.message ?? ''),
         })),
