@@ -601,20 +601,29 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   build_flow_scan: async () => {
     const page = figma.currentPage;
     const pageHasRefFrames = page.children.some((n) => n.name.startsWith('REF /'));
-    const refs = new Map<string, { id: string }>();
+    // Normalize a screen name so "REF / 1 Discovery" pairs with
+    // "Tinder / Discovery": drop a leading step number/ordering prefix
+    // ("1 ", "01. ", "2) ") and lowercase, so REF ordering hints don't break
+    // pairing with the built frame.
+    const norm = (s: string) => s.replace(/^\s*\d+[.)]?\s+/, '').trim().toLowerCase();
+    const refs = new Map<string, { id: string; display: string }>();
     for (const c of page.children) {
-      if (c.name.startsWith('REF /')) refs.set(c.name.slice('REF /'.length).trim(), { id: c.id });
+      if (c.name.startsWith('REF /')) {
+        const display = c.name.slice('REF /'.length).trim();
+        refs.set(norm(display), { id: c.id, display });
+      }
     }
     const builtByScreen = new Map<string, SceneNode>();
     for (const c of page.children) {
       if (c.name.startsWith('REF /')) continue;
       const sep = c.name.indexOf(' / ');
       if (sep === -1) continue;
-      builtByScreen.set(c.name.slice(sep + 3).trim(), c as SceneNode);
+      builtByScreen.set(norm(c.name.slice(sep + 3)), c as SceneNode);
     }
     const pairs = [];
-    for (const [screenName, ref] of refs) {
-      const built = builtByScreen.get(screenName) ?? null;
+    for (const [key, ref] of refs) {
+      const screenName = ref.display;
+      const built = builtByScreen.get(key) ?? null;
       const verdict = built ? getPairVerdict(`${ref.id}::${built.id}`) : null;
       const lint = built ? runStructuralLint(built, pageHasRefFrames) : [];
       pairs.push({
