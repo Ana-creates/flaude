@@ -158,10 +158,17 @@ export function SettingsView({
     }
   };
 
-  const hostedSseUrl = license?.email
-    ? `https://flaude-pro-mcp.fly.dev/sse?email=${encodeURIComponent(license.email)}`
-    : 'https://flaude-pro-mcp.fly.dev/sse?email=<your-email>';
-  const cliCommand = `claude mcp add flaude --transport sse ${hostedSseUrl}`;
+  // Prefer the Bearer token (a real secret) in everything the user copies; the
+  // ?email= form is the legacy fallback for licenses activated before token
+  // auth and dies when the server's migration window closes.
+  const hostedSseUrl = license?.mcpToken
+    ? `https://flaude-pro-mcp.fly.dev/sse?token=${encodeURIComponent(license.mcpToken)}`
+    : license?.email
+      ? `https://flaude-pro-mcp.fly.dev/sse?email=${encodeURIComponent(license.email)}`
+      : 'https://flaude-pro-mcp.fly.dev/sse?email=<your-email>';
+  const cliCommand = license?.mcpToken
+    ? `claude mcp add flaude --transport sse https://flaude-pro-mcp.fly.dev/sse --header "Authorization: Bearer ${license.mcpToken}"`
+    : `claude mcp add flaude --transport sse ${hostedSseUrl}`;
 
   const handleSave = () => {
     const trimmed = inputValue.trim();

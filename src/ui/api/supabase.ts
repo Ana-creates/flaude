@@ -125,7 +125,7 @@ export async function checkProSubscription(
  */
 export async function activateProSubscription(
   email: string
-): Promise<{ success: boolean; isPro: boolean; error?: string }> {
+): Promise<{ success: boolean; isPro: boolean; error?: string; mcpToken?: string }> {
   const normalized = email.toLowerCase().trim();
 
   if (!normalized || !normalized.includes('@')) {
@@ -137,7 +137,13 @@ export async function activateProSubscription(
   const result = await checkProSubscription(normalized);
 
   if (result.isPro) {
-    return { success: true, isPro: true };
+    // Fetch the Bearer credential for the hosted MCP. Goes through the Pro
+    // server (service key), NOT Supabase directly — the anon key embedded in
+    // this public plugin deliberately cannot read the mcpToken column.
+    // Best-effort: activation still succeeds without it (email auth works
+    // during the migration window), the connection just stays on ?email=.
+    const mcpToken = await fetchMcpToken(normalized);
+    return { success: true, isPro: true, mcpToken };
   }
 
   return {
@@ -146,4 +152,24 @@ export async function activateProSubscription(
     error:
       'No active Pro subscription found for this email. If you just paid, wait 30 seconds and try again.',
   };
+}
+
+/**
+ * Fetch the caller's MCP Bearer token from the Pro server. Returns undefined on
+ * any failure — callers treat the token as an upgrade, never a requirement.
+ */
+export async function fetchMcpToken(email: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(
+      `https://flaude-pro-mcp.fly.dev/my-token?email=${encodeURIComponent(email.toLowerCase().trim())}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as { token?: string };
+    return typeof data.token === 'string' && data.token.startsWith('mcp-')
+      ? data.token
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }

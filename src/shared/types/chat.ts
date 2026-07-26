@@ -91,6 +91,9 @@ export interface License {
   key: string;
   plan: PlanType;
   activatedAt: number;
+  /** Bearer credential for the hosted MCP (mcp-…). Fetched at activation;
+   * optional so licenses stored before token auth keep deserializing. */
+  mcpToken?: string;
 }
 
 export const PLAN_LIMITS = {

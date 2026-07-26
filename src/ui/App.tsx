@@ -5,7 +5,7 @@ import { ChatView } from './components/features/ChatView';
 import { SettingsView } from './components/features/SettingsView';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
-import { saveUserEmail, checkProSubscription } from './api/supabase';
+import { saveUserEmail, checkProSubscription, fetchMcpToken } from './api/supabase';
 import { insertCopiedScreen } from './api/handoff';
 import { mcpClient } from './mcp/websocket-client';
 import type { ChatMessage, SelectionContext, Settings, License } from '../shared/types';
@@ -123,6 +123,22 @@ export function App() {
     }
   }, [license?.email]);
 
+  // Token backfill: licenses stored BEFORE token auth have no mcpToken. Fetch
+  // it once and re-save, so existing Pro customers migrate to Bearer silently
+  // (no re-activation) before the server's email-auth window closes.
+  useEffect(() => {
+    if (license?.plan !== 'pro' || !license.email || license.mcpToken) return;
+    let cancelled = false;
+    fetchMcpToken(license.email).then((mcpToken) => {
+      if (cancelled || !mcpToken) return; // best-effort; email auth still works
+      const upgraded: License = { ...license, mcpToken };
+      setLicense(upgraded);
+      emit('SAVE_LICENSE', upgraded);
+      console.log('[Flaude] MCP token backfilled for existing Pro license');
+    });
+    return () => { cancelled = true; };
+  }, [license?.plan, license?.email, license?.mcpToken]);
+
   // Auto-connect the WebSocket whenever we have a Pro license.
   // (Free users have to opt in via the legacy MCPConnection Connect button
   // because their MCP runs locally and may not be started yet.)
@@ -135,7 +151,7 @@ export function App() {
       // Disconnect if license was cleared or downgraded
       mcpClient.disconnect();
     }
-  }, [license?.plan, license?.email]);
+  }, [license?.plan, license?.email, license?.mcpToken]);
 
 
 
@@ -154,11 +170,17 @@ export function App() {
     // Paid users get plan='pro' → websocket-client uses hosted MCP at flaude-pro-mcp.fly.dev.
     const proCheck = await checkProSubscription(normalizedEmail);
 
+    // Pro users also get their MCP Bearer token so the hosted connection can
+    // authenticate with a real secret instead of the (public) email.
+    // Best-effort: a failed token fetch must never block activation.
+    const mcpToken = proCheck.isPro ? await fetchMcpToken(normalizedEmail) : undefined;
+
     const newLicense: License = {
       email: normalizedEmail,
       key: generateLicenseKey(normalizedEmail),
       plan: proCheck.isPro ? 'pro' : 'free',
       activatedAt: Date.now(),
+      mcpToken,
     };
     setLicense(newLicense);
     emit('SAVE_LICENSE', newLicense);

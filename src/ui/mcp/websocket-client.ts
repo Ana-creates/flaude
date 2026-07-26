@@ -83,6 +83,13 @@ class MCPWebSocketClient {
    */
   private getWebSocketUrl(): string {
     if (this.license?.plan === 'pro' && this.license.email) {
+      // Prefer the Bearer token (a real secret) over the email (public and
+      // guessable). Browsers can't set headers on a WebSocket, so it rides as
+      // ?token=. Email remains the fallback for licenses activated before
+      // token auth existed — valid until the server's migration window closes.
+      if (this.license.mcpToken) {
+        return `${HOSTED_WS_URL}?token=${encodeURIComponent(this.license.mcpToken)}`;
+      }
       return `${HOSTED_WS_URL}?email=${encodeURIComponent(this.license.email)}`;
     }
     return LOCAL_WS_URL;
