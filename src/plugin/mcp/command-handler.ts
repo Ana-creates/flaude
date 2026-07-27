@@ -38,6 +38,7 @@ import {
   verifyLayout,
 } from '../tools/edit-tools';
 import { seedIosKit } from '../tools/ios-kit-seed';
+import { extractBrandStyles } from '../tools/extract-brand-styles';
 import { runStructuralLint } from '../tools/structural-lint';
 import { flaudeHelpers, drainFailedIconLookups } from '../tools/flaude-helpers';
 import {
@@ -211,6 +212,10 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
     referenceFrameId: params.referenceFrameId as string | undefined,
     pageId: params.pageId as string | undefined,
   }),
+
+  // Read the brand system that already exists in this file — the input that
+  // lets the product study a user's design instead of interviewing them.
+  extract_brand_styles: () => extractBrandStyles(),
 
   get_design_rules: (params) => getDesignRules({
     targetParentId: params.targetParentId as string | undefined,
