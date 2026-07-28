@@ -6,6 +6,7 @@ import { SettingsView } from './components/features/SettingsView';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { saveUserEmail, checkProSubscription, fetchMcpToken } from './api/supabase';
+import { readBakedLicense } from './api/baked-license';
 import { insertCopiedScreen } from './api/handoff';
 import { mcpClient } from './mcp/websocket-client';
 import type { ChatMessage, SelectionContext, Settings, License } from '../shared/types';
@@ -55,6 +56,21 @@ export function App() {
 
     // License loaded
     on('LICENSE_LOADED', (payload: { license: License | null; analysesUsedThisMonth: number }) => {
+      // A zip downloaded from the signed-in studio carries its owner's
+      // identity, so first run needs no email typed at all. A stored licence
+      // always wins; this only fills the gap, and only upward (free -> pro),
+      // so re-importing a build can never downgrade or overwrite anyone.
+      const baked = readBakedLicense();
+      if (
+        baked &&
+        (!payload.license ||
+          (payload.license.plan !== 'pro' && baked.plan === 'pro'))
+      ) {
+        console.log('[Flaude] Activating the licence baked into this download');
+        setLicense(baked);
+        emit('SAVE_LICENSE', baked);
+        return;
+      }
       setLicense(payload.license);
     });
 
