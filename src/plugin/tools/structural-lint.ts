@@ -1279,3 +1279,90 @@ function alignToWordStart(message: string, suffixLen: number): number {
   while (cut < message.length && !/\s/.test(message[cut])) cut++;
   return message.length - cut;
 }
+
+/**
+ * Rules that describe the CALL rather than a node's structure: "you built
+ * without capturing the reference", "you never ran a pixel diff", "this screen
+ * is below the fidelity bar", "an icon lookup failed and was swallowed".
+ *
+ * These are the checks that exist to stop an agent skipping a verification
+ * step, they are few, and they are the whole reason the lint is always-on — so
+ * they are NEVER summarised away, regardless of which nodes they name.
+ */
+const PROCESS_RULES = new Set([
+  'built-without-reference-capture',
+  'built-without-pixel-diff',
+  'built-without-review',
+  'built-below-fidelity-bar',
+  'built-omits-reference-elements',
+  'swallowed-icon-lookup-failure',
+  'ios-screen-wrong-font',
+]);
+
+export interface TieredLint {
+  /** Full detail: process rules, plus findings on nodes this call created. */
+  findings: Array<Record<string, unknown>>;
+  /**
+   * Everything else on the page, as counts only. Present ONLY when non-empty.
+   * Pre-existing defects stay visible as a number and a rule name; the detail
+   * is one `review_screen` call away.
+   */
+  preExisting?: {
+    total: number;
+    byRule: Record<string, number>;
+    note: string;
+  };
+}
+
+/**
+ * Split findings into "about this call" and "already on the page".
+ *
+ * Why this shape, and not a filter: Figma exposes no per-node modified
+ * timestamp, so the plugin cannot distinguish a node this call EDITED from one
+ * it never touched. Any filter that drops findings on nodes it believes are
+ * untouched would therefore silently stop reporting real defects the agent just
+ * introduced into an existing frame — trading tokens for blindness.
+ *
+ * So nothing is ever dropped. Findings outside the newly created subtrees are
+ * demoted to a count per rule: still visible, still countable, ~80 tokens
+ * instead of ~2,800. Measured on a real file, 86 findings cost 10,110 tokens as
+ * full text; 84 of them were on nodes the call never touched.
+ *
+ * `touchedIds` must contain the created top-level nodes AND their descendants,
+ * since a defect is nearly always reported on a child (a loose vector inside a
+ * new frame), not on the frame itself.
+ */
+export function tierFindings(
+  findings: Array<Record<string, unknown>>,
+  touchedIds: ReadonlySet<string>
+): TieredLint {
+  const full: Array<Record<string, unknown>> = [];
+  const byRule: Record<string, number> = {};
+  let preExistingTotal = 0;
+
+  for (const f of findings) {
+    const rule = typeof f.rule === 'string' ? f.rule : '_unknown';
+    const nodeId = typeof f.nodeId === 'string' ? f.nodeId : '';
+    // A process rule, or a node this call created — either way, full detail.
+    // A finding with no nodeId is page-level by construction, so it is kept:
+    // silence is the one outcome worse than verbosity.
+    if (PROCESS_RULES.has(rule) || !nodeId || touchedIds.has(nodeId)) {
+      full.push(f);
+      continue;
+    }
+    preExistingTotal++;
+    byRule[rule] = (byRule[rule] ?? 0) + 1;
+  }
+
+  if (preExistingTotal === 0) return { findings: full };
+
+  return {
+    findings: full,
+    preExisting: {
+      total: preExistingTotal,
+      byRule,
+      note:
+        'Defects on nodes this call did not create, summarised to keep the response small. They are NOT new and NOT necessarily yours. Call review_screen(nodeId) on a specific frame for full detail. If you edited an existing frame in this call, check it explicitly — the plugin cannot detect edits, only creations.',
+    },
+  };
+}

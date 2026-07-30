@@ -39,7 +39,7 @@ import {
 } from '../tools/edit-tools';
 import { seedIosKit } from '../tools/ios-kit-seed';
 import { extractBrandStyles } from '../tools/extract-brand-styles';
-import { compactFindings, runStructuralLint } from '../tools/structural-lint';
+import { compactFindings, runStructuralLint, tierFindings } from '../tools/structural-lint';
 import { flaudeHelpers, drainFailedIconLookups } from '../tools/flaude-helpers';
 import {
   recordScreenshot,
@@ -462,6 +462,22 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         const page = figma.currentPage;
         const pageHasRefFrames = page.children.some((n) => n.name.startsWith('REF /'));
         const lint: unknown[] = runStructuralLint(page, pageHasRefFrames);
+
+        // Which nodes did THIS call create? Defects are almost always reported
+        // on a child (a loose vector inside a new frame) rather than on the new
+        // top-level node itself, so the whole subtree counts as touched.
+        const touchedIds = new Set<string>();
+        if (page.id === beforePage.id) {
+          for (const child of page.children) {
+            if (beforeIds.has(child.id)) continue;
+            const stack: BaseNode[] = [child];
+            while (stack.length > 0) {
+              const n = stack.pop()!;
+              touchedIds.add(n.id);
+              if ('children' in n) for (const c of n.children) stack.push(c);
+            }
+          }
+        }
         if (page.id === beforePage.id) {
           lint.push(...checkReferenceCaptured(page, beforeIds));
         }
@@ -483,10 +499,19 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
           // receives the FULL per-node findings, because the flywheel counts
           // instances to decide which defects deserve a new rule — compacting
           // first would corrupt those counts.
-          return {
-            ...(result as Record<string, unknown>),
-            _lint: compactFindings(lint as Array<Record<string, unknown>>),
-          };
+          //
+          // Two stages: tier by what this call created (pre-existing defects
+          // become counts, never disappear), then fold each surviving rule's
+          // repeated advice into one copy.
+          const tiered = tierFindings(lint as Array<Record<string, unknown>>, touchedIds);
+          const payload: Record<string, unknown> = { ...(result as Record<string, unknown>) };
+          // Omit `_lint` entirely when this call introduced nothing, rather than
+          // returning an empty array — an empty key still reads as a signal.
+          if (tiered.findings.length > 0) {
+            payload._lint = compactFindings(tiered.findings);
+          }
+          if (tiered.preExisting) payload._lintPreExisting = tiered.preExisting;
+          return payload;
         }
       } catch {
         // Lint is advisory only — never let a lint failure mask the real result.
