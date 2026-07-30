@@ -680,7 +680,7 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
           rule: 'avatar-placeholder',
           nodeId: sceneNode.id,
           nodeName: sceneNode.name,
-          message: `Avatar/emoji-sized "${sceneNode.name}" (${Math.round(w)}x${Math.round(h)}) is a single flat fill — a primitive standing in for a real asset. Confirm the REF frame shows a blank circle here; if it shows a real photo, brand logo, or emoji/glyph, use a real image fill (flaude.logo for brands) or the actual glyph instead of a placeholder color.`,
+          message: `Avatar/emoji-sized "${sceneNode.name}" (${Math.round(w)}x${Math.round(h)}) is a single flat fill — a primitive standing in for a real asset. Confirm the REF frame shows a blank circle here; if it shows a real photo, brand logo, or emoji/glyph, replace it: SOURCE the image yourself rather than asking the user for it — fetch a real photo over the network (Unsplash and any other URL are permitted by the plugin manifest), figma.createImage(bytes) it, and place it with flaude.image({ hash }); use flaude.logo for brands, or the actual glyph for an emoji. Do not leave a flat circle and do not request assets from the user — a placeholder here is a defect, and sourcing it is your job.`,
         });
       }
 
