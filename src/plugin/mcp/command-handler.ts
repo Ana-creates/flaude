@@ -39,7 +39,7 @@ import {
 } from '../tools/edit-tools';
 import { seedIosKit } from '../tools/ios-kit-seed';
 import { extractBrandStyles } from '../tools/extract-brand-styles';
-import { runStructuralLint } from '../tools/structural-lint';
+import { compactFindings, runStructuralLint } from '../tools/structural-lint';
 import { flaudeHelpers, drainFailedIconLookups } from '../tools/flaude-helpers';
 import {
   recordScreenshot,
@@ -479,7 +479,14 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
           // data layer of the auto-improvement loop. Never awaited: telemetry
           // must not slow or fail a design call.
           recordFindings(lint as Array<Record<string, unknown>>, page.name);
-          return { ...(result as Record<string, unknown>), _lint: lint };
+          // Compact only what goes over the wire. The ledger above deliberately
+          // receives the FULL per-node findings, because the flywheel counts
+          // instances to decide which defects deserve a new rule — compacting
+          // first would corrupt those counts.
+          return {
+            ...(result as Record<string, unknown>),
+            _lint: compactFindings(lint as Array<Record<string, unknown>>),
+          };
         }
       } catch {
         // Lint is advisory only — never let a lint failure mask the real result.
@@ -673,9 +680,10 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         diffHistory: verdict?.history ?? null,
         reviewed,
         photoDense,
-        lint: (lint as unknown as Array<{ rule: string; nodeName?: string; message?: string }>).map((f) => ({
-          rule: String(f.rule), nodeName: String(f.nodeName ?? ''), message: String(f.message ?? ''),
-        })),
+        // Compacted for the same reason as the execute path: build_flow reports
+        // every pair on the page at once, so repeating each rule's advice per
+        // node multiplied the payload by the number of screens in the flow.
+        lint: compactFindings(lint as unknown as Array<Record<string, unknown>>),
       });
     }
     return { pairs };
@@ -700,7 +708,10 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         findings.length === 0
           ? 'PASS — no structural defects found. (Structural only; still verify concept/copy against the reference image and run compare_to_reference for pixel drift.)'
           : `NOT DONE — ${findings.length} defect${findings.length === 1 ? '' : 's'} must be fixed before this screen is finished.`,
-      findings,
+      // `pass` and the verdict count above deliberately use the FULL findings,
+      // so the defect count a caller sees is unchanged; only the transmitted
+      // text is folded.
+      findings: compactFindings(findings as unknown as Array<Record<string, unknown>>),
     };
   },
 

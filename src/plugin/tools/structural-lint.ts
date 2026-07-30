@@ -1170,3 +1170,112 @@ export function runStructuralLint(root: BaseNode, pageHasRefFrames: boolean): Li
   visit(root, 0);
   return findings;
 }
+
+/** A rule's findings collapsed into one entry: advice once, nodes listed. */
+export interface CompactLintGroup {
+  rule: string;
+  count: number;
+  /** The node-specific part of each message, keyed by node. */
+  nodes: Array<{ nodeId: string; nodeName: string; detail: string }>;
+  /** The guidance shared by every finding of this rule — sent ONCE. */
+  message: string;
+}
+
+/**
+ * Collapse repeated findings so each rule's guidance is transmitted once.
+ *
+ * Why: every rule's message ends in the same paragraph of advice ("Reuse a
+ * premade concept via flaude.icon(concept) — call get_core_icons ..."). With 11
+ * hand-drawn-icon findings that identical 336-character tail went over the wire
+ * 11 times: ~3.7KB of which ~3.4KB was duplication, while the node-specific
+ * part was 33 characters. Measured on a real file, `_lint` was 94% of the
+ * response to a call whose actual result was 12 characters.
+ *
+ * This is a PRESENTATION change only. No rule, threshold or traversal is
+ * touched, and no finding is dropped — every node still appears, addressable by
+ * id. The shared tail is discovered at runtime as the longest common suffix of
+ * the group, so rules need no rewriting and the full original text stays
+ * reconstructable as `detail + message`.
+ */
+export function compactFindings(
+  findings: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const byRule = new Map<string, Array<Record<string, unknown>>>();
+  const order: string[] = [];
+  for (const f of findings) {
+    const rule = typeof f.rule === 'string' ? f.rule : '_unknown';
+    let bucket = byRule.get(rule);
+    if (!bucket) {
+      bucket = [];
+      byRule.set(rule, bucket);
+      order.push(rule);
+    }
+    bucket.push(f);
+  }
+
+  const out: Array<Record<string, unknown>> = [];
+  for (const rule of order) {
+    const group = byRule.get(rule)!;
+    // A lone finding gains nothing from grouping — pass it through untouched so
+    // the common case of "one real defect" reads exactly as it does today.
+    if (group.length < 2) {
+      out.push(group[0]);
+      continue;
+    }
+
+    const messages = group.map((f) => (typeof f.message === 'string' ? f.message : ''));
+    let suffixLen = commonSuffixLength(messages);
+    // Only fold when the shared tail is substantial; a few coincidentally equal
+    // trailing characters are not worth restructuring the output for.
+    if (suffixLen < 40) {
+      for (const f of group) out.push(f);
+      continue;
+    }
+    suffixLen = alignToWordStart(messages[0], suffixLen);
+
+    const shared = messages[0].slice(messages[0].length - suffixLen).trim();
+    out.push({
+      rule,
+      count: group.length,
+      nodes: group.map((f, i) => ({
+        nodeId: typeof f.nodeId === 'string' ? f.nodeId : '',
+        nodeName: typeof f.nodeName === 'string' ? f.nodeName : '',
+        detail: messages[i].slice(0, messages[i].length - suffixLen).trim(),
+      })),
+      message: shared,
+    });
+  }
+  return out;
+}
+
+function commonSuffixLength(messages: string[]): number {
+  if (messages.length === 0) return 0;
+  let len = messages[0].length;
+  for (let i = 1; i < messages.length; i++) {
+    const a = messages[0];
+    const b = messages[i];
+    let k = 0;
+    const max = Math.min(a.length, b.length, len);
+    while (k < max && a[a.length - 1 - k] === b[b.length - 1 - k]) k++;
+    len = k;
+    if (len === 0) break;
+  }
+  return len;
+}
+
+/**
+ * Move the suffix boundary FORWARD to the next word start, so the shared text
+ * begins at a word rather than mid-token ("...seed it", not "...eed it").
+ *
+ * It must shrink, never grow. Growing backwards looks equivalent but silently
+ * corrupts: these messages differ in a token immediately before the shared
+ * tail (`Icon-sized vector "Vector" (27x26) is loose vector art...`), so
+ * extending the "shared" text leftwards swallows ONE node's dimensions and then
+ * reports them for every node in the group. Caught by the losslessness test —
+ * every node was being described as 32x30.
+ */
+function alignToWordStart(message: string, suffixLen: number): number {
+  let cut = message.length - suffixLen;
+  while (cut < message.length && !/\s/.test(message[cut])) cut++;
+  return message.length - cut;
+}
