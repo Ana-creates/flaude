@@ -709,6 +709,10 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
         // every pair on the page at once, so repeating each rule's advice per
         // node multiplied the payload by the number of screens in the flow.
         lint: compactFindings(lint as unknown as Array<Record<string, unknown>>),
+        // The TRUE finding count. Compaction turns N findings into fewer
+        // groups, so consumers must not infer the count from lint.length —
+        // build_flow reports it to the agent as "(N findings)".
+        lintTotal: lint.length,
       });
     }
     return { pairs };

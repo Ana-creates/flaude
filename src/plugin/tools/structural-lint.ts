@@ -1234,15 +1234,20 @@ export function compactFindings(
     suffixLen = alignToWordStart(messages[0], suffixLen);
 
     const shared = messages[0].slice(messages[0].length - suffixLen).trim();
+    const firstDetail = messages[0].slice(0, messages[0].length - suffixLen).trim();
     out.push({
       rule,
       count: group.length,
+      // Standalone-readable: consumers that show only `message` (build_flow's
+      // nextAction) must still get a complete sentence, not a dangling tail.
+      message: firstDetail ? `${firstDetail} ${shared}` : shared,
       nodes: group.map((f, i) => ({
         nodeId: typeof f.nodeId === 'string' ? f.nodeId : '',
         nodeName: typeof f.nodeName === 'string' ? f.nodeName : '',
         detail: messages[i].slice(0, messages[i].length - suffixLen).trim(),
       })),
-      message: shared,
+      /** The guidance shared by every node above, without any one node's detail. */
+      sharedMessage: shared,
     });
   }
   return out;
