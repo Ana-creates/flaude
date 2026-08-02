@@ -1,31 +1,33 @@
 import { h, Fragment } from 'preact';
 import { useState } from 'preact/hooks';
-import { PlanCover, isTrialling } from '../common/PlanCover';
+import { PlanCover } from '../common/PlanCover';
 import { MCPConnection } from './MCPConnection';
-import { saveUserEmail } from '../../api/supabase';
+import { saveUserEmail, FLAUDE_PRICING_URL } from '../../api/supabase';
 import type { License } from '../../../shared/types';
 
 /**
- * The whole plugin, on one screen.
+ * The whole plugin, on ONE page. There is no second screen any more.
  *
- * WHAT THIS REPLACES. The old first run was a mascot, "Welcome to Flaude",
- * "Design with Claude directly in Figma. Free & open source." and a black
- * "Get Started" pill — a splash screen that named the product to someone who
- * had just installed it by name, and whose one button led to a chat. That chat
- * was scenery: App.tsx passed `onSendMessage={() => {}}`, `onQuickAction={()
- * => {}}` and an always-empty message list, so the plugin's default view was
- * an input box wired to nothing, and the only thing it can actually do —
- * connect Claude to this file — was hidden behind a gear icon in the corner.
+ * WHAT THIS REPLACES (1): the old first run was a mascot, "Welcome to Flaude"
+ * and a "Get Started" pill leading to a chat that was scenery — App.tsx passed
+ * `onSendMessage={() => {}}` and an always-empty message list, so the default
+ * view was an input wired to nothing while the only thing the plugin can
+ * actually do, connect Claude to this file, hid behind a gear.
  *
- * So the chat is gone and the connection is the plugin. One cover, one state,
- * one next action. Settings keeps the rarely-touched things (upgrading,
- * clearing a licence) instead of hiding the main event.
+ * WHAT THIS REPLACES (2): Settings. It held exactly two live controls — your
+ * email with a Sign out button, and the collapse control — and it took a gear
+ * click, a subview, and a back arrow to reach them. Worse, COLLAPSE was in
+ * there: the one action you want while working (shrink this panel so it stops
+ * covering the canvas) was reachable only by leaving the page that shows your
+ * connection. So the gear is now the collapse button, in the same corner, and
+ * the email row moved down here under the connection. Two things on one page
+ * beats two things on two pages.
  *
  * The three states are exhaustive and deliberately do not overlap:
- *   anon — no email yet. One field. Nothing else is offered, because nothing
- *          else works yet and a menu of dead options is what we just removed.
- *   free — has an email, no subscription. Local MCP instructions + the upgrade.
- *   pro  — connection status, the URL to paste into Claude, and a thank-you.
+ *   anon — no email yet. One field. Nothing else, because nothing else works
+ *          yet and a menu of dead options is what we just removed.
+ *   free — email, no subscription. Local MCP setup + what Pro would change.
+ *   pro  — connection state and the URL to paste into Claude.
  */
 
 type MCPStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'auth_failed';
@@ -36,7 +38,9 @@ interface HomeViewProps {
   hostedUrl: string;
   cliCommand: string;
   onSaveEmail: (email: string) => void;
-  onOpenSettings: () => void;
+  onSignOut: () => void;
+  /** Shrink the panel to a status strip. Only offered once connected. */
+  onCollapse?: () => void;
   onCopy: (text: string, which: 'desktop' | 'cli') => void;
   copied: 'desktop' | 'cli' | null;
 }
@@ -47,7 +51,8 @@ export function HomeView({
   hostedUrl,
   cliCommand,
   onSaveEmail,
-  onOpenSettings,
+  onSignOut,
+  onCollapse,
   onCopy,
   copied,
 }: HomeViewProps) {
@@ -77,14 +82,6 @@ export function HomeView({
     }
   };
 
-  const caption = isTrialling(license)
-    ? 'Your trial is live. Claude is wired straight into this file.'
-    : isPro
-      ? 'Thanks for subscribing. Claude is wired straight into this file.'
-      : hasEmail
-        ? 'Connect Claude to this file through your local MCP server.'
-        : /* unused while signed out - the cover is artwork only there */ '';
-
   return (
     <div
       style={{
@@ -93,14 +90,13 @@ export function HomeView({
         padding: '12px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px',
+        gap: '14px',
       }}
     >
       <PlanCover
         license={license}
-        caption={caption}
         plain={!hasEmail}
-        onSettings={hasEmail ? onOpenSettings : undefined}
+        onCollapse={mcpStatus === 'connected' ? onCollapse : undefined}
       />
 
       {!hasEmail && (
@@ -113,17 +109,16 @@ export function HomeView({
           {/* ONE PILL, input and button sharing a single dark capsule.
 
               This is the founder's original form, restored. A stacked
-              field-then-button pair is the generic web-signup shape and it made
-              a two-field-looking form out of one question; the capsule reads as
-              a single control, which is what it is. The divider is the only
-              thing separating them. */}
+              field-then-button pair is the generic web-signup shape and made a
+              two-field-looking form out of one question; the capsule reads as
+              a single control, which is what it is. */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               width: '100%',
               borderRadius: 'var(--radius-full)',
-              background: 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)',
+              background: INK,
               boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
               overflow: 'hidden',
             }}
@@ -174,30 +169,40 @@ export function HomeView({
       )}
 
       {hasEmail && isPro && (
-        <Fragment>
-          <Section title="Claude connection">
-            <StatusRow status={mcpStatus} />
-            <p style={hint}>
-              Paste this once into Claude → Settings → Connectors → Add custom connector, then
-              restart Claude.
-            </p>
-            <button
-              onClick={() => onCopy(hostedUrl, 'desktop')}
-              style={{
-                ...primaryButton,
-                background:
-                  copied === 'desktop' ? 'var(--color-success)' : primaryButton.background,
-              }}
-            >
-              {copied === 'desktop' ? '✓ Copied' : 'Copy connection URL'}
-            </button>
-            <button onClick={() => onCopy(cliCommand, 'cli')} style={linkButton}>
-              {copied === 'cli'
-                ? '✓ Copied CLI command'
-                : 'Using Claude Code? Copy the CLI command'}
-            </button>
-          </Section>
-        </Fragment>
+        <Section title="Claude connection">
+          <StatusRow status={mcpStatus} />
+
+          {/* TWO COPY TARGETS, and the old labels never said why you would want
+              one over the other. They are the SAME server reached two ways:
+
+                Copy connection URL — the https://…/sse address you paste into
+                the Claude DESKTOP app (Settings -> Connectors -> Add custom
+                connector). GUI, done once, no terminal.
+
+                Copy the CLI command — `claude mcp add flaude --transport sse
+                …`, which registers that same URL with CLAUDE CODE from a
+                terminal. (Confirmed against api/connection.ts: it really is
+                the Claude Code CLI, not a "CLA" anything.)
+
+              So the choice is not two products, it is which Claude you use.
+              The labels now say that, and the second is a real button rather
+              than an underlined link pretending to be prose. */}
+          <p style={hint}>Paste this into Claude, once.</p>
+
+          <CopyButton
+            primary
+            done={copied === 'desktop'}
+            onClick={() => onCopy(hostedUrl, 'desktop')}
+            label="Copy connection URL"
+            sub="Claude desktop app · Settings → Connectors"
+          />
+          <CopyButton
+            done={copied === 'cli'}
+            onClick={() => onCopy(cliCommand, 'cli')}
+            label="Copy terminal command"
+            sub="Claude Code"
+          />
+        </Section>
       )}
 
       {hasEmail && !isPro && (
@@ -205,32 +210,61 @@ export function HomeView({
           <Section title="Claude connection">
             <MCPConnection license={license} />
           </Section>
-          <button onClick={onOpenSettings} style={upsell}>
+          <a href={FLAUDE_PRICING_URL} target="_blank" rel="noreferrer" style={upsell}>
             <span style={{ fontWeight: 600 }}>Skip the local server</span>
             <span style={{ opacity: 0.7 }}>
-              {/* No price. See the note in SettingsView — a number baked into
-                  a shipped plugin binary cannot be corrected without a
-                  re-release. */}
+              {/* No price. A number baked into a shipped plugin binary cannot
+                  be corrected without a re-release, so it lies for as long as
+                  the old build is installed. Prices live in the website's
+                  plans.ts, which this link goes to. */}
               Pro is one URL pasted into Claude. Nothing to run on your machine.
             </span>
-          </button>
+          </a>
         </Fragment>
+      )}
+
+      {/* The whole of the old Settings page, now a single row where it belongs:
+          under the thing it identifies. */}
+      {hasEmail && (
+        <div style={accountRow}>
+          <span
+            style={{
+              fontSize: '12px',
+              color: 'var(--figma-color-text-secondary)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {license?.email}
+          </span>
+          <button onClick={onSignOut} style={quietButton}>
+            Sign out
+          </button>
+        </div>
       )}
     </div>
   );
 }
 
-/** A titled group. The plugin is 400px wide; cards inside cards read as noise. */
+/**
+ * A titled group.
+ *
+ * The title is Fraunces, the website's display serif, at a readable size
+ * instead of 11px letter-spaced uppercase grey. That treatment is the default
+ * "settings label" look of every plugin in the Figma sidebar, and it made the
+ * one sentence of structure this panel has read like fine print.
+ */
 function Section({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div
         style={{
-          fontSize: '11px',
+          fontFamily: 'var(--font-display)',
+          fontSize: '16px',
           fontWeight: 600,
-          letterSpacing: '0.04em',
-          textTransform: 'uppercase',
-          color: 'var(--figma-color-text-tertiary)',
+          letterSpacing: '-0.01em',
+          color: 'var(--figma-color-text)',
         }}
       >
         {title}
@@ -255,49 +289,169 @@ function Section({ title, children }: { title: string; children: preact.Componen
    this button was left pointing at the dead one. */
 
 /**
+ * Copy button with a two-line label.
+ *
+ * The confirmation used to repaint the entire button flat green — the loudest
+ * element on the page, for two seconds, to report a success nobody doubted.
+ * Now only the glyph and label change and the surface holds still, so the eye
+ * is not yanked back to a button you have finished with.
+ */
+function CopyButton({
+  label,
+  sub,
+  done,
+  primary,
+  onClick,
+}: {
+  label: string;
+  sub: string;
+  done: boolean;
+  primary?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        width: '100%',
+        padding: '11px 14px',
+        textAlign: 'left',
+        borderRadius: 'var(--radius-md)',
+        cursor: 'pointer',
+        // Ink, not the blue gradient that was here. The gradient was borrowed
+        // from the website's hero CTA, where it sits on artwork; dropped into
+        // a white Figma panel it was a saturated slab with nothing to hold it.
+        ...(primary
+          ? { background: INK, color: '#ffffff', border: 'none' }
+          : {
+              background: 'var(--figma-color-bg-secondary)',
+              color: 'var(--figma-color-text)',
+              border: '1px solid var(--card-border)',
+            }),
+      }}
+    >
+      <span
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '16px',
+          flexShrink: 0,
+          color: done ? 'var(--color-success)' : 'currentColor',
+          opacity: done ? 1 : 0.75,
+        }}
+      >
+        {done ? (
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        ) : (
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: '13px', fontWeight: 600 }}>
+          {done ? 'Copied' : label}
+        </span>
+        <span style={{ display: 'block', fontSize: '11px', opacity: 0.65, marginTop: '1px' }}>
+          {sub}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/**
  * The connection, stated plainly.
  *
- * A green dot on its own is a decoration; people read a coloured dot as "the
- * plugin is alive". Each state names what is true and, when something is
- * wrong, what the user is supposed to do about it.
+ * The dot used to be an 8px green circle floating in a grey bar — read as
+ * decoration, or as a bullet point, and it said nothing the sentence next to
+ * it did not. It is now a ring: a filled core inside a soft halo of the same
+ * hue, which reads as a signal lamp rather than a dot, and the whole row is
+ * tinted with the state's colour so status is legible before you read a word.
  */
 function StatusRow({ status }: { status: MCPStatus }) {
-  const map: Record<MCPStatus, { color: string; text: string }> = {
-    connected: { color: 'var(--color-success)', text: 'Claude is connected' },
-    connecting: { color: 'var(--color-warning)', text: 'Connecting…' },
+  const map: Record<MCPStatus, { color: string; halo: string; tint: string; text: string }> = {
+    connected: {
+      color: '#10b981',
+      halo: 'rgba(16, 185, 129, 0.22)',
+      tint: 'rgba(16, 185, 129, 0.09)',
+      text: 'Connected to Claude',
+    },
+    connecting: {
+      color: '#eab308',
+      halo: 'rgba(234, 179, 8, 0.22)',
+      tint: 'rgba(234, 179, 8, 0.09)',
+      text: 'Connecting…',
+    },
     disconnected: {
       color: 'var(--figma-color-text-tertiary)',
+      halo: 'rgba(120, 120, 120, 0.18)',
+      tint: 'var(--figma-color-bg-secondary)',
       text: 'Not connected yet',
     },
     error: {
       color: '#ef4444',
+      halo: 'rgba(239, 68, 68, 0.22)',
+      tint: 'rgba(239, 68, 68, 0.09)',
       text: 'Connection dropped. It will retry on its own',
     },
     auth_failed: {
       color: '#ef4444',
-      text: 'Subscription not recognised. Re-activate in Settings',
+      halo: 'rgba(239, 68, 68, 0.22)',
+      tint: 'rgba(239, 68, 68, 0.09)',
+      text: 'Subscription not recognised. Sign out and back in',
     },
   };
-  const { color, text } = map[status];
+  const { color, halo, tint, text } = map[status];
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        padding: '10px 12px',
+        gap: '10px',
+        padding: '11px 13px',
         borderRadius: 'var(--radius-md)',
-        backgroundColor: 'var(--figma-color-bg-secondary)',
-        fontSize: '12px',
+        background: tint,
+        fontSize: '12.5px',
+        fontWeight: 500,
         color: 'var(--figma-color-text)',
       }}
     >
       <span
         style={{
-          width: '8px',
-          height: '8px',
+          width: '7px',
+          height: '7px',
           borderRadius: '50%',
-          backgroundColor: color,
+          background: color,
+          // The halo is a spread shadow rather than a wrapper element, so the
+          // core stays fully saturated instead of inheriting the ring's alpha.
+          boxShadow: `0 0 0 4px ${halo}`,
+          margin: '0 3px',
           flexShrink: 0,
           animation: status === 'connecting' ? 'pulse 1.6s ease-in-out infinite' : 'none',
         }}
@@ -307,54 +461,8 @@ function StatusRow({ status }: { status: MCPStatus }) {
   );
 }
 
-const field: h.JSX.CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '11px 13px',
-  fontSize: '13px',
-  border: '1px solid var(--card-border)',
-  borderRadius: 'var(--radius-md)',
-  backgroundColor: 'var(--figma-color-bg-secondary)',
-  color: 'var(--figma-color-text)',
-};
-
-const primaryButton: h.JSX.CSSProperties = {
-  width: '100%',
-  padding: '11px 16px',
-  fontSize: '13px',
-  fontWeight: 600,
-  border: 'none',
-  borderRadius: 'var(--radius-md)',
-  // The website's own CTA blue, not Figma's, so the plugin and the site read
-  // as one product rather than two.
-  background: 'linear-gradient(135deg, #2563eb 0%, #0026ff 100%)',
-  color: '#ffffff',
-  cursor: 'pointer',
-};
-
-const secondaryButton: h.JSX.CSSProperties = {
-  width: '100%',
-  padding: '11px 16px',
-  fontSize: '13px',
-  fontWeight: 500,
-  borderRadius: 'var(--radius-md)',
-  border: '1px solid var(--card-border)',
-  backgroundColor: 'var(--figma-color-bg-secondary)',
-  color: 'var(--figma-color-text)',
-  cursor: 'pointer',
-};
-
-const linkButton: h.JSX.CSSProperties = {
-  width: '100%',
-  padding: '4px',
-  fontSize: '11px',
-  background: 'transparent',
-  border: 'none',
-  color: 'var(--figma-color-text-tertiary)',
-  cursor: 'pointer',
-  textDecoration: 'underline',
-  textUnderlineOffset: '2px',
-};
+/** Near-black, shared by the email capsule and the primary button. */
+const INK = 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)';
 
 const upsell: h.JSX.CSSProperties = {
   display: 'flex',
@@ -369,12 +477,35 @@ const upsell: h.JSX.CSSProperties = {
   border: '1px solid var(--card-border)',
   backgroundColor: 'var(--figma-color-bg-secondary)',
   color: 'var(--figma-color-text)',
+  textDecoration: 'none',
   cursor: 'pointer',
+};
+
+const accountRow: h.JSX.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '10px',
+  marginTop: 'auto',
+  paddingTop: '12px',
+  borderTop: '1px solid var(--card-border)',
+};
+
+const quietButton: h.JSX.CSSProperties = {
+  padding: '6px 12px',
+  fontSize: '12px',
+  fontWeight: 500,
+  borderRadius: 'var(--radius-full)',
+  border: '1px solid var(--card-border)',
+  background: 'transparent',
+  color: 'var(--figma-color-text-secondary)',
+  cursor: 'pointer',
+  flexShrink: 0,
 };
 
 const hint: h.JSX.CSSProperties = {
   margin: 0,
-  fontSize: '11px',
+  fontSize: '11.5px',
   lineHeight: 1.5,
   color: 'var(--figma-color-text-secondary)',
 };

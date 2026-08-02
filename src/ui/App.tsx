@@ -2,7 +2,6 @@ import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { on, emit } from '@create-figma-plugin/utilities';
 import { HomeView } from './components/features/HomeView';
-import { SettingsView } from './components/features/SettingsView';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { saveUserEmail, checkProSubscription, fetchMcpToken } from './api/supabase';
@@ -14,10 +13,7 @@ import './styles/globals.css';
 
 type MCPStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'auth_failed';
 
-type View = 'home' | 'settings';
-
 export function App() {
-  const [view, setView] = useState<View>('home');
   const [settings, setSettings] = useState<Settings>({
     apiKey: '',
     hasApiKey: false,
@@ -260,12 +256,13 @@ export function App() {
         backgroundColor: 'var(--figma-color-bg)',
       }}
     >
-      {/* NO HEADER. There was a 56px bar here holding a mascot, the word
-          "Flaude", the words "AI Design Assistant" and three icon buttons —
-          chrome naming the product to someone who just launched it by name,
-          above a 400px panel with one job. The cover art in HomeView carries
-          the identity and the settings button; SettingsView keeps its own back
-          bar because a subview needs a way out. */}
+      {/* NO HEADER, AND NO ROUTER. There was a 56px bar holding a mascot, the
+         word "Flaude", "AI Design Assistant" and three icon buttons - chrome
+         naming the product to someone who had just launched it by name. And
+         there was a second view, Settings, whose only live controls were your
+         email, Sign out, and Collapse. All three now sit on the home page:
+         collapse in the cover's corner, the account row beneath the
+         connection. A two-page app for two controls was one page too many. */}
 
       {/* Error Banner */}
       {error && (
@@ -335,38 +332,17 @@ export function App() {
 
       {/* Main Content */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        {view === 'home' && (
-          <HomeView
-            license={license}
-            mcpStatus={mcpStatus}
-            hostedUrl={hostedUrl}
-            cliCommand={cliCommand}
-            copied={copied}
-            onSaveEmail={handleActivateLicense}
-            onOpenSettings={() => setView('settings')}
-            onCopy={copyToClipboard}
-          />
-        )}
-        {view === 'settings' && (
-          <SettingsView
-            apiKey={settings.apiKey}
-            hasApiKey={settings.hasApiKey}
-            model={settings.model}
-            license={license}
-            analysesUsedThisMonth={0}
-            isLoading={false}
-            connectionTestResult={null}
-            mcpConnected={mcpStatus === 'connected'}
-            onSaveApiKey={() => {}}
-            onSaveModel={() => {}}
-            onActivateLicense={handleActivateLicense}
-            onActivatePro={handleActivateLicense}
-            onDeactivateLicense={handleDeactivateLicense}
-            onTestConnection={() => {}}
-            onBack={() => setView('home')}
-            onCollapse={handleCollapse}
-          />
-        )}
+        <HomeView
+          license={license}
+          mcpStatus={mcpStatus}
+          hostedUrl={hostedUrl}
+          cliCommand={cliCommand}
+          copied={copied}
+          onSaveEmail={handleActivateLicense}
+          onSignOut={handleDeactivateLicense}
+          onCollapse={handleCollapse}
+          onCopy={copyToClipboard}
+        />
       </div>
     </div>
   );

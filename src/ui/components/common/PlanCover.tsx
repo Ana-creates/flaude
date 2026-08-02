@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import type { License } from '../../../shared/types';
 import coverUrl from '../../assets/cover-dock.jpg';
+import shopUrl from '../../assets/cover-shop.jpg';
 
 /**
  * The plugin's one piece of artwork, and the only place it states who you are.
@@ -45,44 +46,56 @@ export function planLabel(license: License | null): string {
   if (license?.plan !== 'pro') return 'Free';
   if (isTrialling(license)) {
     const days = Math.max(1, Math.ceil((license.trialEndsAt! - Date.now()) / 86_400_000));
-    return `Trial · ${days} day${days === 1 ? '' : 's'} left`;
+    return `TRIAL · ${days} DAY${days === 1 ? '' : 'S'} LEFT`;
   }
   switch (license.interval) {
     case 'month':
-      return 'Pro · Monthly';
+      return 'PRO · MONTHLY';
     case 'year':
-      return 'Pro · Yearly';
+      return 'PRO · YEARLY';
     case 'lifetime':
-      return 'Pro · Lifetime';
+      return 'PRO · LIFETIME';
     default:
       // An older stored licence with no interval. "Pro" alone is vague but
       // TRUE; inventing an interval to fill the gap would not be.
-      return 'Pro';
+      return 'PRO';
   }
 }
 
 interface PlanCoverProps {
   license: License | null;
-  /** Shown under the badge. Kept short - this is a 400px panel. */
-  caption: string;
-  onSettings?: () => void;
   /**
-   * Before the user has told us who they are, the cover is ARTWORK ONLY.
+   * Before the user has told us who they are, the cover is a DIFFERENT image
+   * and carries no badge.
    *
-   * It used to show a "Free" badge and a caption on first run. Both were
-   * claims about an account that does not exist yet: nobody has signed in, so
-   * the plugin cannot know whether they are free, trialling or a lifetime
-   * customer typing the address they bought with. Greeting that person with
-   * "Free" both tells them something untrue and downgrades them in the one
-   * moment they are deciding whether this is worth their email.
+   * It used to be the same dock artwork as the signed-in state with a "Free"
+   * pill on it. Two problems in one. The badge was a claim about an account
+   * that does not exist yet - nobody has signed in, so the plugin cannot know
+   * whether they are free, trialling, or a lifetime customer about to type the
+   * address they bought with; greeting that person with "Free" is both untrue
+   * and a downgrade in the one moment they are deciding whether to hand over
+   * an email. And reusing one image for first run and steady state meant
+   * connecting your account changed nothing visible: the reward for the only
+   * action on the page was the same picture you were already looking at.
    *
-   * The artwork already carries the icon and the Claude-to-Figma relationship,
-   * so the plate says everything a first-run cover should.
+   * So first run gets the flower shop with the Flaude mark at its centre - the
+   * brand, and nothing claimed - and the Claude-to-Figma dock arrives when the
+   * connection does.
    */
   plain?: boolean;
+  /**
+   * Shrink the panel to a status strip. This is the gear's old corner.
+   *
+   * It used to live inside Settings, which meant the one control you want
+   * WHILE WORKING - get this panel off my canvas - was three clicks deep,
+   * behind the page that shows your connection. Settings is gone; this is what
+   * that corner does now, and only once there is a live connection worth
+   * collapsing down to.
+   */
+  onCollapse?: () => void;
 }
 
-export function PlanCover({ license, caption, onSettings, plain = false }: PlanCoverProps) {
+export function PlanCover({ license, plain = false, onCollapse }: PlanCoverProps) {
   const isPro = license?.plan === 'pro';
   const label = planLabel(license);
 
@@ -90,8 +103,6 @@ export function PlanCover({ license, caption, onSettings, plain = false }: PlanC
     <div
       style={{
         position: 'relative',
-        // 16:9-ish. The dock artwork is 880x543; anything shorter crops the
-        // flowers off its corners and the composition stops reading.
         aspectRatio: '880 / 543',
         // The parent is a flex column; without this the cover is squeezed
         // shorter on the states that have more content below it, so the
@@ -99,29 +110,13 @@ export function PlanCover({ license, caption, onSettings, plain = false }: PlanC
         flexShrink: 0,
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
-        background: `url(${coverUrl}) center/cover no-repeat`,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'flex-end',
+        background: `url(${plain ? shopUrl : coverUrl}) center/cover no-repeat`,
       }}
     >
-      {/* Scrim only at the foot. The artwork's own centre is where the three
-          icons live, and darkening that to make text legible would destroy the
-          one thing the image is for. */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: plain
-            ? 'none'
-            : 'linear-gradient(to top, rgba(4,12,48,0.88) 0%, rgba(4,12,48,0.45) 34%, rgba(4,12,48,0) 62%)',
-        }}
-      />
-
-      {onSettings && (
+      {onCollapse && (
         <button
-          onClick={onSettings}
-          title="Settings"
+          onClick={onCollapse}
+          title="Collapse to a status strip"
           style={{
             position: 'absolute',
             top: '10px',
@@ -134,7 +129,7 @@ export function PlanCover({ license, caption, onSettings, plain = false }: PlanC
             border: 'none',
             borderRadius: 'var(--radius-full)',
             // Glass, matching the artwork's own dock rather than Figma's grey
-            // chrome — a plain secondary button here looked stuck on.
+            // chrome - a plain secondary button here looked stuck on.
             background: 'rgba(255,255,255,0.16)',
             backdropFilter: 'blur(8px)',
             color: '#ffffff',
@@ -151,56 +146,60 @@ export function PlanCover({ license, caption, onSettings, plain = false }: PlanC
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            <polyline points="4 14 10 14 10 20" />
+            <polyline points="20 10 14 10 14 4" />
+            <line x1="14" y1="10" x2="21" y2="3" />
+            <line x1="3" y1="21" x2="10" y2="14" />
           </svg>
         </button>
       )}
 
+      {/* TOP CENTRE, not bottom left, and no caption under it.
+
+          The caption said "Thanks for subscribing. Claude is wired straight
+          into this file." Thanking someone for paying, every single time they
+          open the plugin, is a receipt they did not ask for; and the sentence
+          restated what the connection row below already reports, except the
+          row reports it LIVE and the caption asserted it whether or not the
+          server was reachable. The badge alone is now the claim, and it only
+          claims the thing the licence actually knows: which plan you are on.
+
+          The dock artwork's own composition is symmetrical about the centre
+          with clear sky above it, so a centred plate sits in the one place the
+          image leaves empty. Bottom-left needed a scrim across the whole foot
+          of the picture to stay legible, which flattened the flowers. */}
       {!plain && (
-        <div style={{ position: 'relative', padding: '0 14px 14px' }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: '12px',
+            left: 0,
+            right: 0,
+            display: 'flex',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
           <div
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '5px 10px',
+              padding: '5px 12px',
               borderRadius: 'var(--radius-full)',
               fontSize: '11px',
-              fontWeight: 600,
-              letterSpacing: '0.01em',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
               color: '#ffffff',
-              background: isPro ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.14)',
-              border: '1px solid rgba(255,255,255,0.35)',
+              background: isPro ? 'rgba(255,255,255,0.24)' : 'rgba(10,14,40,0.42)',
+              border: '1px solid rgba(255,255,255,0.4)',
               backdropFilter: 'blur(10px)',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
             }}
           >
-            {isPro && (
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20 6 9 17l-5-5" />
-              </svg>
-            )}
             {label}
           </div>
-          <p
-            style={{
-              margin: '8px 0 0',
-              fontSize: '12px',
-              lineHeight: 1.45,
-              color: 'rgba(255,255,255,0.88)',
-            }}
-          >
-            {caption}
-          </p>
         </div>
       )}
     </div>
