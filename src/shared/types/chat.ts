@@ -94,6 +94,17 @@ export interface License {
   /** Bearer credential for the hosted MCP (mcp-…). Fetched at activation;
    * optional so licenses stored before token auth keep deserializing. */
   mcpToken?: string;
+  /**
+   * What they actually bought: 'month' | 'year' | 'lifetime'.
+   *
+   * Stored so the plugin can say it back to them instead of a bare "PRO"
+   * badge, which a paying customer cannot map to their own receipt. Optional:
+   * licenses saved before this field existed keep deserializing and simply
+   * show no interval rather than a wrong one.
+   */
+  interval?: 'month' | 'year' | 'lifetime';
+  /** Epoch ms. Set only while a card-required free trial is running. */
+  trialEndsAt?: number;
 }
 
 export const PLAN_LIMITS = {

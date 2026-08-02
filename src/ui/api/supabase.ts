@@ -22,11 +22,30 @@ export const REVOLUT_MONTHLY_LINK =
 export const FLAUDE_PRICE = '$25';
 export const FLAUDE_MONTHLY_PRICE = '$5.99';
 
-// Cache subscription checks for an hour to reduce API calls on plugin startup
-const SUBSCRIPTION_CACHE_TTL = 60 * 60 * 1000;
-type CachedResult = {
+/**
+ * What the customer actually bought, for the plugin to say back to them.
+ *
+ * `interval` is the Subscription row's own column: 'month' | 'year' |
+ * 'lifetime'. We surface it because a paying customer opening the plugin and
+ * seeing a bare "PRO" badge cannot tell whether they are on the $5.99 monthly
+ * or the $25 lifetime — the plugin holds that fact and used to throw it away.
+ * `trialEndsAt` is non-null only during a card-required free trial, which the
+ * schema deliberately models as status='active' so Pro unlocks; without
+ * reading it the plugin would tell a trialist they are a paid subscriber.
+ */
+export type PlanInterval = 'month' | 'year' | 'lifetime' | null;
+
+export interface ProStatus {
   isPro: boolean;
   currentPeriodEnd: Date | null;
+  interval: PlanInterval;
+  /** Non-null while a free trial is running. */
+  trialEndsAt: Date | null;
+}
+
+// Cache subscription checks for an hour to reduce API calls on plugin startup
+const SUBSCRIPTION_CACHE_TTL = 60 * 60 * 1000;
+type CachedResult = ProStatus & {
   expiry: number;
 };
 const subscriptionCache = new Map<string, CachedResult>();
@@ -57,9 +76,7 @@ export async function saveUserEmail(email: string): Promise<void> {
  * Queries the Prisma-managed Subscription table via Supabase REST API.
  * Side-effect: also calls saveUserEmail() so the community list stays current.
  */
-export async function checkProSubscription(
-  email: string
-): Promise<{ isPro: boolean; currentPeriodEnd: Date | null }> {
+export async function checkProSubscription(email: string): Promise<ProStatus> {
   const normalized = email.toLowerCase().trim();
 
   // Fire-and-forget: keep community list current (free users still get tracked)
@@ -67,15 +84,13 @@ export async function checkProSubscription(
 
   // Cached?
   const cached = subscriptionCache.get(normalized);
-  if (cached && Date.now() < cached.expiry) {
-    return { isPro: cached.isPro, currentPeriodEnd: cached.currentPeriodEnd };
-  }
+  if (cached && Date.now() < cached.expiry) return stripExpiry(cached);
 
   try {
     const response = await fetch(
       `${SUBSCRIPTION_SUPABASE_URL}/rest/v1/Subscription?email=eq.${encodeURIComponent(
         normalized
-      )}&status=eq.active&select=currentPeriodEnd&order=currentPeriodEnd.desc&limit=1`,
+      )}&status=eq.active&select=currentPeriodEnd,interval,trialEndsAt&order=currentPeriodEnd.desc&limit=1`,
       {
         method: 'GET',
         headers: {
@@ -88,44 +103,79 @@ export async function checkProSubscription(
 
     if (!response.ok) {
       // Supabase error — fall back to cached value (grace) or "free"
-      return cached
-        ? { isPro: cached.isPro, currentPeriodEnd: cached.currentPeriodEnd }
-        : { isPro: false, currentPeriodEnd: null };
+      return cached ? stripExpiry(cached) : FREE;
     }
 
-    const data = (await response.json()) as { currentPeriodEnd: string }[];
-    let isPro = false;
-    let currentPeriodEnd: Date | null = null;
+    const data = (await response.json()) as {
+      currentPeriodEnd: string;
+      interval: string | null;
+      trialEndsAt: string | null;
+    }[];
+    let status: ProStatus = FREE;
 
-    if (data.length > 0 && data[0].currentPeriodEnd) {
-      const periodEnd = new Date(data[0].currentPeriodEnd);
+    const row = data[0];
+    if (row?.currentPeriodEnd) {
+      const periodEnd = new Date(row.currentPeriodEnd);
       if (!isNaN(periodEnd.getTime()) && periodEnd > new Date()) {
-        isPro = true;
-        currentPeriodEnd = periodEnd;
+        const trialEndsAt = row.trialEndsAt ? new Date(row.trialEndsAt) : null;
+        status = {
+          isPro: true,
+          currentPeriodEnd: periodEnd,
+          interval: normalizeInterval(row.interval),
+          // A trial whose end date has passed is not a trial any more; the row
+          // is simply not cleaned up until the renewal webhook lands.
+          trialEndsAt:
+            trialEndsAt && !isNaN(trialEndsAt.getTime()) && trialEndsAt > new Date()
+              ? trialEndsAt
+              : null,
+        };
       }
     }
 
     subscriptionCache.set(normalized, {
-      isPro,
-      currentPeriodEnd,
+      ...status,
       expiry: Date.now() + SUBSCRIPTION_CACHE_TTL,
     });
-    return { isPro, currentPeriodEnd };
+    return status;
   } catch (err) {
     console.error('[Flaude] Subscription check failed:', err);
-    return cached
-      ? { isPro: cached.isPro, currentPeriodEnd: cached.currentPeriodEnd }
-      : { isPro: false, currentPeriodEnd: null };
+    return cached ? stripExpiry(cached) : FREE;
   }
+}
+
+const FREE: ProStatus = {
+  isPro: false,
+  currentPeriodEnd: null,
+  interval: null,
+  trialEndsAt: null,
+};
+
+function stripExpiry(c: CachedResult): ProStatus {
+  return {
+    isPro: c.isPro,
+    currentPeriodEnd: c.currentPeriodEnd,
+    interval: c.interval,
+    trialEndsAt: c.trialEndsAt,
+  };
+}
+
+/** Anything unrecognised becomes null rather than being shown to the user. */
+function normalizeInterval(raw: string | null): PlanInterval {
+  if (raw === 'month' || raw === 'year' || raw === 'lifetime') return raw;
+  return null;
 }
 
 /**
  * Called after the user clicks "Activate" — clears the cache and re-checks.
  * Returns success if their email is now in the Subscription table as active.
  */
-export async function activateProSubscription(
-  email: string
-): Promise<{ success: boolean; isPro: boolean; error?: string; mcpToken?: string }> {
+export async function activateProSubscription(email: string): Promise<{
+  success: boolean;
+  isPro: boolean;
+  error?: string;
+  mcpToken?: string;
+  status?: ProStatus;
+}> {
   const normalized = email.toLowerCase().trim();
 
   if (!normalized || !normalized.includes('@')) {
@@ -143,7 +193,7 @@ export async function activateProSubscription(
     // Best-effort: activation still succeeds without it (email auth works
     // during the migration window), the connection just stays on ?email=.
     const mcpToken = await fetchMcpToken(normalized);
-    return { success: true, isPro: true, mcpToken };
+    return { success: true, isPro: true, mcpToken, status: result };
   }
 
   return {

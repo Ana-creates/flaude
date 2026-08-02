@@ -14,8 +14,12 @@ import {
   FLAUDE_PRICE,
   FLAUDE_MONTHLY_PRICE,
 } from '../../api/supabase';
-import mascotUrl from '../../assets/mascot.png';
-import proGradientUrl from '../../assets/pro-gradient.jpg';
+import { PlanCover } from '../common/PlanCover';
+import {
+  hostedSseUrl as hostedSseUrlFor,
+  cliCommandFor,
+  copyText,
+} from '../../api/connection';
 
 interface SettingsViewProps {
   apiKey: string;
@@ -125,50 +129,16 @@ export function SettingsView({
   };
 
   const copyToClipboard = async (text: string, which: 'desktop' | 'cli') => {
-    let success = false;
-    // Try modern clipboard API first
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-        success = true;
-      }
-    } catch {
-      // Modern API blocked (Figma iframe permission). Fall through to legacy.
-    }
-    // Fallback: textarea + execCommand (works in sandboxed iframes)
-    if (!success) {
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        ta.style.left = '-9999px';
-        document.body.appendChild(ta);
-        ta.focus();
-        ta.select();
-        success = document.execCommand('copy');
-        document.body.removeChild(ta);
-      } catch {
-        success = false;
-      }
-    }
-    if (success) {
-      setCopiedCommand(which);
-      setTimeout(() => setCopiedCommand(null), 2000);
-    }
+    if (!(await copyText(text))) return;
+    setCopiedCommand(which);
+    setTimeout(() => setCopiedCommand(null), 2000);
   };
 
-  // Prefer the Bearer token (a real secret) in everything the user copies; the
-  // ?email= form is the legacy fallback for licenses activated before token
-  // auth and dies when the server's migration window closes.
-  const hostedSseUrl = license?.mcpToken
-    ? `https://flaude-pro-mcp.fly.dev/sse?token=${encodeURIComponent(license.mcpToken)}`
-    : license?.email
-      ? `https://flaude-pro-mcp.fly.dev/sse?email=${encodeURIComponent(license.email)}`
-      : 'https://flaude-pro-mcp.fly.dev/sse?email=<your-email>';
-  const cliCommand = license?.mcpToken
-    ? `claude mcp add flaude --transport sse https://flaude-pro-mcp.fly.dev/sse --header "Authorization: Bearer ${license.mcpToken}"`
-    : `claude mcp add flaude --transport sse ${hostedSseUrl}`;
+  // One derivation, shared with the home screen — see api/connection.ts. This
+  // used to be duplicated here, and a second copy of the auth-mode choice is a
+  // second chance to silently break someone's connection.
+  const hostedSseUrl = hostedSseUrlFor(license);
+  const cliCommand = cliCommandFor(license);
 
   const handleSave = () => {
     const trimmed = inputValue.trim();
@@ -262,256 +232,68 @@ export function SettingsView({
       {/* Content */}
       <div style={{ flex: 1, padding: '16px', overflowY: 'auto' }}>
 
-        {/* MCP & Email Section */}
-        <div
-          style={{
-            padding: '0',
-            marginBottom: '16px',
-            borderRadius: 'var(--radius-lg)',
-            background: `linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.3) 30%, rgba(0, 0, 0, 0) 60%), url(${proGradientUrl}) center/cover no-repeat`,
-            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.3)',
-            minHeight: '200px',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            overflow: 'hidden',
-          }}
-        >
-          {/* Top section - Flaude title */}
-          <div style={{ padding: '16px 16px 0' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-              <img
-                src={mascotUrl}
-                alt="Flaude"
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  objectFit: 'contain',
-                  flexShrink: 0,
-                }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span style={{
-                    fontSize: '20px',
-                    fontFamily: 'var(--font-display)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    color: '#ffffff'
-                  }}>
-                    Flaude
-                  </span>
-                  <span style={{
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    padding: '3px 8px',
-                    borderRadius: 'var(--radius-full)',
-                    border: isPro
-                      ? '1px solid rgba(251, 191, 36, 0.7)'
-                      : '1px solid rgba(34, 197, 94, 0.6)',
-                    color: isPro
-                      ? 'rgba(251, 191, 36, 1)'
-                      : 'rgba(34, 197, 94, 0.9)',
-                    backgroundColor: isPro
-                      ? 'rgba(251, 191, 36, 0.12)'
-                      : 'rgba(34, 197, 94, 0.1)',
-                  }}>
-                    {isPro ? 'PRO' : 'FREE'}
-                  </span>
-                </div>
-                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', margin: 0, lineHeight: 1.4 }}>
-                  {isPro
-                    ? 'Pro — hosted MCP, no local setup needed.'
-                    : 'Free & open source. Upgrade to Pro for one-click Claude integration.'}
-                </p>
-              </div>
-            </div>
+        {/* ACCOUNT ONLY.
+
+            This used to be a 250-line clone of the home screen: the same cover
+            art, the same PRO badge, the same Copy-URL / paste-into-Claude
+            steps. Two places to change one flow, and the one people reached
+            first (the home screen) did not exist yet — the connection lived
+            HERE, behind a gear icon, which is why the plugin felt like it did
+            nothing when you opened it.
+
+            Settings is now what its name says: who you are signed in as, and
+            the upgrade. The connection lives on the home screen. */}
+        <PlanCover
+          license={license}
+          caption={
+            isPro
+              ? 'Thanks for subscribing.'
+              : 'Free plan — Claude connects through a local MCP server.'
+          }
+        />
+
+        {hasEmail && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '8px',
+              margin: '12px 0 16px',
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--card-border)',
+              backgroundColor: 'var(--figma-color-bg-secondary)',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '12px',
+                color: 'var(--figma-color-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {license!.email}
+            </span>
+            <button
+              onClick={onDeactivateLicense}
+              style={{
+                flexShrink: 0,
+                padding: '5px 10px',
+                fontSize: '11px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--card-border)',
+                backgroundColor: 'transparent',
+                color: 'var(--figma-color-text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              Sign out
+            </button>
           </div>
-
-          {/* Bottom section — Pro: connect Claude action / Free: legacy local-MCP info / No email: prompt */}
-          <div style={{ padding: '12px 16px 16px' }}>
-            {hasEmail && isPro ? (
-              <div style={{
-                padding: '14px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                backdropFilter: 'blur(10px)',
-              }}>
-                {/* Step 1 — Copy URL */}
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    letterSpacing: '0.5px',
-                    color: 'rgba(255,255,255,0.7)',
-                    marginBottom: '6px',
-                    textTransform: 'uppercase',
-                  }}>
-                    Step 1 — Copy your connection URL
-                  </div>
-                  <button
-                    onClick={() => copyToClipboard(hostedSseUrl, 'desktop')}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      width: '100%',
-                      padding: '12px 16px',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: copiedCommand === 'desktop' ? 'rgba(34, 197, 94, 0.95)' : '#ffffff',
-                      color: copiedCommand === 'desktop' ? '#ffffff' : '#1a1a1a',
-                      cursor: 'pointer',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    {copiedCommand === 'desktop' ? '✓ Copied!' : 'Copy URL'}
-                  </button>
-                </div>
-
-                {/* Step 2 — Paste it */}
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    letterSpacing: '0.5px',
-                    color: 'rgba(255,255,255,0.7)',
-                    marginBottom: '6px',
-                    textTransform: 'uppercase',
-                  }}>
-                    Step 2 — Paste into Claude
-                  </div>
-                  <p style={{
-                    fontSize: '11px',
-                    color: 'rgba(255,255,255,0.85)',
-                    margin: 0,
-                    lineHeight: 1.5,
-                  }}>
-                    Open Claude Desktop or Claude.ai → <strong>Settings → Connectors</strong> → Add custom connector → paste. Restart Claude.
-                  </p>
-                </div>
-
-                {/* Step 3 — confirmation */}
-                <div style={{
-                  padding: '10px 12px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                  border: '1px solid rgba(34, 197, 94, 0.4)',
-                  marginBottom: '12px',
-                }}>
-                  <div style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    color: 'rgba(220, 252, 231, 1)',
-                    marginBottom: '2px',
-                  }}>
-                    ✓ You're all set
-                  </div>
-                  <p style={{
-                    fontSize: '10px',
-                    color: 'rgba(220, 252, 231, 0.85)',
-                    margin: 0,
-                    lineHeight: 1.4,
-                  }}>
-                    Once Claude connects, ask it anything — designs appear in this Figma file.
-                  </p>
-                </div>
-
-                {/* Secondary: CLI for Claude Code users */}
-                <button
-                  onClick={() => copyToClipboard(cliCommand, 'cli')}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    padding: '6px',
-                    fontSize: '10px',
-                    background: 'transparent',
-                    border: 'none',
-                    color: copiedCommand === 'cli' ? 'rgba(34, 197, 94, 0.95)' : 'rgba(255,255,255,0.55)',
-                    cursor: 'pointer',
-                    textDecoration: 'underline',
-                    textUnderlineOffset: '2px',
-                  }}
-                >
-                  {copiedCommand === 'cli' ? '✓ Copied CLI command' : 'Using Claude Code instead? Copy CLI command'}
-                </button>
-
-                {/* Email display */}
-                <div style={{
-                  marginTop: '14px',
-                  paddingTop: '10px',
-                  borderTop: '1px solid rgba(255,255,255,0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}>
-                  <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.9)' }}>
-                    {license!.email}
-                  </span>
-                  <button
-                    onClick={onDeactivateLicense}
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: '10px',
-                      border: 'none',
-                      borderRadius: '4px',
-                      backgroundColor: 'transparent',
-                      color: 'rgba(255, 255, 255, 0.5)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-            ) : hasEmail ? (
-              <>
-                {/* Free user with email — show legacy local MCP info */}
-                <MCPConnection license={license} variant="dark" />
-
-                <div style={{
-                  marginTop: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}>
-                  <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.9)' }}>
-                    {license!.email}
-                  </span>
-                  <button
-                    onClick={onDeactivateLicense}
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: '10px',
-                      border: 'none',
-                      borderRadius: '4px',
-                      backgroundColor: 'transparent',
-                      color: 'rgba(255, 255, 255, 0.5)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div style={{
-                padding: '12px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                textAlign: 'center',
-              }}>
-                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>
-                  Submit your email first to connect
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
 
         {/* ─────────────────────────────────────────────── */}
         {/* FREE USER ONLY — Pro upgrade card (Pro users see all actions in the gradient card above) */}

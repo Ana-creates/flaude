@@ -1,28 +1,25 @@
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { on, emit } from '@create-figma-plugin/utilities';
-import { ChatView } from './components/features/ChatView';
+import { HomeView } from './components/features/HomeView';
 import { SettingsView } from './components/features/SettingsView';
 import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { saveUserEmail, checkProSubscription, fetchMcpToken } from './api/supabase';
 import { readBakedLicense } from './api/baked-license';
 import { insertCopiedScreen } from './api/handoff';
+import { hostedSseUrl, cliCommandFor, copyText } from './api/connection';
 import { mcpClient } from './mcp/websocket-client';
-import type { ChatMessage, SelectionContext, Settings, License } from '../shared/types';
+import type { Settings, License } from '../shared/types';
 import './styles/globals.css';
-import mascotUrl from './assets/mascot.png';
 
 type MCPStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'auth_failed';
 
-type View = 'chat' | 'settings';
+type View = 'home' | 'settings';
 
 export function App() {
-  const [view, setView] = useState<View>('chat');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [view, setView] = useState<View>('home');
   const [settings, setSettings] = useState<Settings>({ apiKey: '', hasApiKey: false, model: DEFAULT_MODEL });
-  const [selectionContext, setSelectionContext] = useState<SelectionContext | null>(null);
   const [license, setLicense] = useState<License | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
@@ -34,6 +31,25 @@ export function App() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [inserting, setInserting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [copied, setCopied] = useState<'desktop' | 'cli' | null>(null);
+
+  // Both the home screen and Settings offer these, from one derivation.
+  const hostedUrl = hostedSseUrl(license);
+  const cliCommand = cliCommandFor(license);
+
+  const copyToClipboard = useCallback(
+    async (text: string, which: 'desktop' | 'cli') => {
+      const ok = await copyText(text);
+      if (!ok) {
+        setError('Could not reach the clipboard — select the text and copy it manually.');
+        setTimeout(() => setError(null), 6000);
+        return;
+      }
+      setCopied(which);
+      setTimeout(() => setCopied(null), 2000);
+    },
+    []
+  );
 
 
   // Setup event listeners for plugin communication
@@ -41,11 +57,6 @@ export function App() {
     // Settings loaded from plugin storage
     on('SETTINGS_LOADED', (payload: Settings) => {
       setSettings(payload);
-    });
-
-    // Selection context from Figma
-    on('SELECTION_CONTEXT', (context: SelectionContext) => {
-      setSelectionContext(context);
     });
 
     // General errors from plugin
@@ -76,7 +87,6 @@ export function App() {
 
     // Load initial data from plugin
     emit('LOAD_SETTINGS');
-    emit('GET_SELECTION_CONTEXT');
     emit('LOAD_LICENSE');
   }, []);
 
@@ -265,124 +275,12 @@ export function App() {
         backgroundColor: 'var(--figma-color-bg)',
       }}
     >
-      {/* Header */}
-      {view === 'chat' && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--card-border)',
-          }}
-        >
-          {/* Logo & Tagline */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <img
-              src={mascotUrl}
-              alt="Flaude"
-              style={{
-                width: '32px',
-                height: '32px',
-                objectFit: 'contain',
-              }}
-            />
-            <div>
-              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--figma-color-text)' }}>
-                Flaude
-              </span>
-              <span style={{ fontSize: '11px', color: 'var(--figma-color-text-tertiary)', marginLeft: '8px' }}>
-                AI Design Assistant
-              </span>
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {/* Minimize button - only show when MCP is connected */}
-            {mcpStatus === 'connected' && (
-              <button
-                onClick={handleCollapse}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '32px',
-                  height: '32px',
-                  border: 'none',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                  color: '#22c55e',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-                title="Minimize - MCP Connected"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4 14 10 14 10 20" />
-                  <polyline points="20 10 14 10 14 4" />
-                  <line x1="14" y1="10" x2="21" y2="3" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              </button>
-            )}
-            <button
-              onClick={() => { setError(null); setNotice(null); setPasteOpen((v) => !v); }}
-              disabled={inserting}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '32px',
-                height: '32px',
-                border: 'none',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: pasteOpen ? 'rgba(249, 115, 22, 0.12)' : 'var(--figma-color-bg-secondary)',
-                color: pasteOpen ? '#f97316' : 'var(--figma-color-text-secondary)',
-                cursor: inserting ? 'wait' : 'pointer',
-                opacity: inserting ? 0.5 : 1,
-                transition: 'all 0.2s ease',
-              }}
-              title={inserting ? 'Inserting…' : 'Paste a screen you copied on flaude.app'}
-            >
-              {inserting ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 0.8s linear infinite' }}>
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="8" y="2" width="8" height="4" rx="1" />
-                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                  <path d="M12 11v6" />
-                  <path d="M9 14l3 3 3-3" />
-                </svg>
-              )}
-            </button>
-            <button
-              onClick={() => setView('settings')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '32px',
-                height: '32px',
-                border: 'none',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--figma-color-bg-secondary)',
-                color: 'var(--figma-color-text-secondary)',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-              }}
-              title="Settings"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
+      {/* NO HEADER. There was a 56px bar here holding a mascot, the word
+          "Flaude", the words "AI Design Assistant" and three icon buttons —
+          chrome naming the product to someone who just launched it by name,
+          above a 400px panel with one job. The cover art in HomeView carries
+          the identity and the settings button; SettingsView keeps its own back
+          bar because a subview needs a way out. */}
 
       {/* Error Banner */}
       {error && (
@@ -468,18 +366,18 @@ export function App() {
 
       {/* Main Content */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        {view === 'chat' && (
-          <ChatView
-            messages={messages}
-            isLoading={false}
-            hasApiKey={settings.hasApiKey}
-            selectionContext={selectionContext}
-            agentStatus={null}
-            userEmail={license?.email || null}
+        {view === 'home' && (
+          <HomeView
+            license={license}
+            mcpStatus={mcpStatus}
+            hostedUrl={hostedUrl}
+            cliCommand={cliCommand}
+            inserting={inserting}
+            copied={copied}
             onSaveEmail={handleActivateLicense}
-            onSendMessage={() => {}}
-            onQuickAction={() => {}}
             onOpenSettings={() => setView('settings')}
+            onPaste={() => { setError(null); setNotice(null); setPasteOpen((v) => !v); }}
+            onCopy={copyToClipboard}
           />
         )}
         {view === 'settings' && (
@@ -498,7 +396,7 @@ export function App() {
             onActivatePro={handleActivateLicense}
             onDeactivateLicense={handleDeactivateLicense}
             onTestConnection={() => {}}
-            onBack={() => setView('chat')}
+            onBack={() => setView('home')}
             onCollapse={handleCollapse}
           />
         )}
