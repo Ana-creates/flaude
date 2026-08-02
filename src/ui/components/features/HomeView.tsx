@@ -185,6 +185,9 @@ export function HomeView({
           <button onClick={onOpenSettings} style={upsell}>
             <span style={{ fontWeight: 600 }}>Skip the local server</span>
             <span style={{ opacity: 0.7 }}>
+              {/* No price. See the note in SettingsView — a number baked into
+                  a shipped plugin binary cannot be corrected without a
+                  re-release. */}
               Pro is one URL pasted into Claude — nothing to run on your
               machine.
             </span>

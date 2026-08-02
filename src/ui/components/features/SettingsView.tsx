@@ -9,10 +9,7 @@ import { MCPConnection } from './MCPConnection';
 import {
   saveUserEmail,
   activateProSubscription,
-  REVOLUT_PAYMENT_LINK,
-  REVOLUT_MONTHLY_LINK,
-  FLAUDE_PRICE,
-  FLAUDE_MONTHLY_PRICE,
+  FLAUDE_PRICING_URL,
 } from '../../api/supabase';
 import { PlanCover } from '../common/PlanCover';
 import {
@@ -307,85 +304,61 @@ export function SettingsView({
             border: '1px solid var(--card-border)',
             backgroundColor: 'var(--figma-color-bg-secondary)',
           }}>
+            {/* NO PRICES HERE.
+
+                This block used to print a lifetime price and a monthly price
+                and link straight at two hardcoded Revolut payment links. All
+                four facts were stale — none of those numbers matched the real
+                plans, which live in plans.ts on the website — and they were
+                stale in the worst possible place: a price
+                baked into a shipped plugin binary cannot be corrected without
+                a re-release, so it quietly lies for as long as the old build
+                is installed. Those raw checkout links also bypassed trial
+                eligibility, referral codes and team seats, all of which the
+                site's checkout enforces server-side.
+
+                So the plugin states no price and owns no checkout. It sends
+                people to the page whose job that is. */}
             <div style={{ marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--figma-color-text)' }}>
-                  Upgrade to Flaude Pro
-                </span>
-                <span style={{
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  padding: '2px 8px',
-                  borderRadius: 'var(--radius-full)',
-                  border: '1px solid rgba(251, 191, 36, 0.5)',
-                  color: 'rgba(251, 191, 36, 1)',
-                  backgroundColor: 'rgba(251, 191, 36, 0.1)',
-                }}>
-                  {FLAUDE_PRICE} lifetime
-                </span>
-              </div>
-              <p style={{ fontSize: '11px', color: 'var(--figma-color-text-secondary)', margin: 0, lineHeight: 1.4 }}>
-                Skip the MCP setup. Paste one URL into Claude. As easy as setting up an email account in Outlook.
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--figma-color-text)' }}>
+                Upgrade to Flaude Pro
+              </span>
+              <p style={{ fontSize: '11px', color: 'var(--figma-color-text-secondary)', margin: '4px 0 0', lineHeight: 1.45 }}>
+                Skip the local server. Paste one URL into Claude and designs
+                land in this file.
               </p>
             </div>
 
-            {/* Subscribe button — lifetime (primary) */}
             <a
-              href={REVOLUT_PAYMENT_LINK}
+              href={FLAUDE_PRICING_URL}
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setHasClickedPay(true)}
               style={{
                 display: 'block',
                 width: '100%',
-                padding: '10px 16px',
-                marginBottom: '6px',
+                padding: '11px 16px',
+                marginBottom: '8px',
                 fontSize: '12px',
                 fontWeight: 600,
                 textAlign: 'center',
                 textDecoration: 'none',
                 border: 'none',
                 borderRadius: 'var(--radius-md)',
-                background: 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)',
+                background: 'linear-gradient(135deg, #2563eb 0%, #0026ff 100%)',
                 color: 'white',
                 cursor: 'pointer',
                 boxSizing: 'border-box',
               }}
             >
-              {hasClickedPay ? `✓ Opened — pay ${FLAUDE_PRICE} via Revolut` : `Get lifetime (${FLAUDE_PRICE}) →`}
-            </a>
-
-            {/* Monthly subscription — secondary */}
-            <a
-              href={REVOLUT_MONTHLY_LINK}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setHasClickedPay(true)}
-              style={{
-                display: 'block',
-                width: '100%',
-                padding: '9px 16px',
-                marginBottom: '8px',
-                fontSize: '11px',
-                fontWeight: 600,
-                textAlign: 'center',
-                textDecoration: 'none',
-                borderRadius: 'var(--radius-md)',
-                background: 'transparent',
-                color: 'var(--figma-color-text)',
-                border: '1px solid var(--card-border)',
-                cursor: 'pointer',
-                boxSizing: 'border-box',
-              }}
-            >
-              Or subscribe monthly ({FLAUDE_MONTHLY_PRICE}/mo) →
+              {hasClickedPay ? '✓ Opened flaude.app/pricing' : 'See plans on flaude.app →'}
             </a>
 
             {/* Activate section */}
             {hasClickedPay && (
               <div style={{ marginTop: '8px' }}>
                 <p style={{ fontSize: '10px', color: 'var(--figma-color-text-secondary)', margin: '0 0 6px', lineHeight: 1.4 }}>
-                  After paying, enter the email you paid with:
+                  Already paid? Enter the email you paid with:
                 </p>
                 <input
                   type="email"

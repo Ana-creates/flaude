@@ -14,21 +14,31 @@ const EMAIL_SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
 const SUBSCRIPTION_SUPABASE_URL = SUPABASE_URL;
 const SUBSCRIPTION_SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
 
-// Revolut Payment Links — customers click these to buy Pro
-export const REVOLUT_PAYMENT_LINK =
-  'https://checkout.revolut.com/pay/fe98f40c-fd93-41cf-82fd-a34a204fabca';
-export const REVOLUT_MONTHLY_LINK =
-  'https://checkout.revolut.com/pay/0f17f7c5-508e-4f2b-b75e-8dcea4d8b654';
-export const FLAUDE_PRICE = '$25';
-export const FLAUDE_MONTHLY_PRICE = '$5.99';
+/**
+ * Where the plugin sends someone who wants to buy.
+ *
+ * IT NO LONGER HARDCODES PRICES OR CHECKOUT LINKS. This file used to declare
+ * a lifetime price and a monthly price as constants, next to two raw Revolut
+ * payment links. Every one of those four facts was stale. The real plans —
+ * monthly, yearly and lifetime, with their amounts — live in ONE place,
+ * flaude-website/src/lib/plans.ts, and are sold through the site's own
+ * checkout, which enforces trial eligibility, referral codes and team seats
+ * that a fixed Revolut link bypasses entirely.
+ *
+ * A price baked into a shipped plugin binary cannot be corrected without a
+ * re-release, so the plugin now states no price at all and hands off to the
+ * page that owns them. If you find yourself adding a number here, don't.
+ */
+export const FLAUDE_PRICING_URL = 'https://www.flaude.app/pricing';
 
 /**
  * What the customer actually bought, for the plugin to say back to them.
  *
  * `interval` is the Subscription row's own column: 'month' | 'year' |
  * 'lifetime'. We surface it because a paying customer opening the plugin and
- * seeing a bare "PRO" badge cannot tell whether they are on the $5.99 monthly
- * or the $25 lifetime — the plugin holds that fact and used to throw it away.
+ * seeing a bare "PRO" badge cannot tell which plan the plugin thinks they are
+ * on — it holds that fact and used to throw it away. The interval only; the
+ * AMOUNT stays out of the plugin (see FLAUDE_PRICING_URL below).
  * `trialEndsAt` is non-null only during a card-required free trial, which the
  * schema deliberately models as status='active' so Pro unlocks; without
  * reading it the plugin would tell a trialist they are a paid subscriber.

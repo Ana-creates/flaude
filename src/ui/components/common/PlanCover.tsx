@@ -28,9 +28,11 @@ export type CoverTone = 'pro' | 'free' | 'anon';
 /**
  * Turn a licence into the line a customer can check against their receipt.
  *
- * A bare "PRO" is unfalsifiable from the user's side: someone paying $5.99 a
- * month and someone who paid $25 once see the identical badge, so neither can
- * tell whether the plugin has their subscription right. Trials matter most of
+ * A bare "PRO" is unfalsifiable from the user's side: someone on the monthly
+ * plan and someone who paid once for lifetime see the identical badge, so
+ * neither can tell whether the plugin has their subscription right. (No prices
+ * anywhere in this plugin — they live in the website's plans.ts and a number
+ * baked into a shipped binary cannot be corrected without a re-release.) Trials matter most of
  * all — the schema stores an active trial as status='active' (so Pro unlocks),
  * which means without trialEndsAt the plugin would tell a trialist they are a
  * paying subscriber and then silently stop working on them.
