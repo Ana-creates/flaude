@@ -245,7 +245,7 @@ export function SettingsView({
           caption={
             isPro
               ? 'Thanks for subscribing.'
-              : 'Free plan — Claude connects through a local MCP server.'
+              : 'Free plan. Claude connects through a local MCP server.'
           }
         />
 

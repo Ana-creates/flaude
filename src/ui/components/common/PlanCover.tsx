@@ -38,20 +38,13 @@ export type CoverTone = 'pro' | 'free' | 'anon';
  * paying subscriber and then silently stop working on them.
  */
 export function isTrialling(license: License | null): boolean {
-  return (
-    license?.plan === 'pro' &&
-    !!license.trialEndsAt &&
-    license.trialEndsAt > Date.now()
-  );
+  return license?.plan === 'pro' && !!license.trialEndsAt && license.trialEndsAt > Date.now();
 }
 
 export function planLabel(license: License | null): string {
   if (license?.plan !== 'pro') return 'Free';
   if (isTrialling(license)) {
-    const days = Math.max(
-      1,
-      Math.ceil((license.trialEndsAt! - Date.now()) / 86_400_000)
-    );
+    const days = Math.max(1, Math.ceil((license.trialEndsAt! - Date.now()) / 86_400_000));
     return `Trial · ${days} day${days === 1 ? '' : 's'} left`;
   }
   switch (license.interval) {
@@ -70,12 +63,26 @@ export function planLabel(license: License | null): string {
 
 interface PlanCoverProps {
   license: License | null;
-  /** Shown under the badge. Kept short — this is a 400px panel. */
+  /** Shown under the badge. Kept short - this is a 400px panel. */
   caption: string;
   onSettings?: () => void;
+  /**
+   * Before the user has told us who they are, the cover is ARTWORK ONLY.
+   *
+   * It used to show a "Free" badge and a caption on first run. Both were
+   * claims about an account that does not exist yet: nobody has signed in, so
+   * the plugin cannot know whether they are free, trialling or a lifetime
+   * customer typing the address they bought with. Greeting that person with
+   * "Free" both tells them something untrue and downgrades them in the one
+   * moment they are deciding whether this is worth their email.
+   *
+   * The artwork already carries the icon and the Claude-to-Figma relationship,
+   * so the plate says everything a first-run cover should.
+   */
+  plain?: boolean;
 }
 
-export function PlanCover({ license, caption, onSettings }: PlanCoverProps) {
+export function PlanCover({ license, caption, onSettings, plain = false }: PlanCoverProps) {
   const isPro = license?.plan === 'pro';
   const label = planLabel(license);
 
@@ -105,8 +112,9 @@ export function PlanCover({ license, caption, onSettings }: PlanCoverProps) {
         style={{
           position: 'absolute',
           inset: 0,
-          background:
-            'linear-gradient(to top, rgba(4,12,48,0.88) 0%, rgba(4,12,48,0.45) 34%, rgba(4,12,48,0) 62%)',
+          background: plain
+            ? 'none'
+            : 'linear-gradient(to top, rgba(4,12,48,0.88) 0%, rgba(4,12,48,0.45) 34%, rgba(4,12,48,0) 62%)',
         }}
       />
 
@@ -149,52 +157,52 @@ export function PlanCover({ license, caption, onSettings }: PlanCoverProps) {
         </button>
       )}
 
-      <div style={{ position: 'relative', padding: '0 14px 14px' }}>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: 'var(--radius-full)',
-            fontSize: '11px',
-            fontWeight: 600,
-            letterSpacing: '0.01em',
-            color: '#ffffff',
-            background: isPro
-              ? 'rgba(255,255,255,0.22)'
-              : 'rgba(255,255,255,0.14)',
-            border: '1px solid rgba(255,255,255,0.35)',
-            backdropFilter: 'blur(10px)',
-          }}
-        >
-          {isPro && (
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          )}
-          {label}
+      {!plain && (
+        <div style={{ position: 'relative', padding: '0 14px 14px' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '5px 10px',
+              borderRadius: 'var(--radius-full)',
+              fontSize: '11px',
+              fontWeight: 600,
+              letterSpacing: '0.01em',
+              color: '#ffffff',
+              background: isPro ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.14)',
+              border: '1px solid rgba(255,255,255,0.35)',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            {isPro && (
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            )}
+            {label}
+          </div>
+          <p
+            style={{
+              margin: '8px 0 0',
+              fontSize: '12px',
+              lineHeight: 1.45,
+              color: 'rgba(255,255,255,0.88)',
+            }}
+          >
+            {caption}
+          </p>
         </div>
-        <p
-          style={{
-            margin: '8px 0 0',
-            fontSize: '12px',
-            lineHeight: 1.45,
-            color: 'rgba(255,255,255,0.88)',
-          }}
-        >
-          {caption}
-        </p>
-      </div>
+      )}
     </div>
   );
 }

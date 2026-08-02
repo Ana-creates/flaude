@@ -7,7 +7,6 @@ import { DEFAULT_MODEL, UI_DIMENSIONS } from '../shared/constants/defaults';
 import { generateLicenseKey } from '../shared/utils/license';
 import { saveUserEmail, checkProSubscription, fetchMcpToken } from './api/supabase';
 import { readBakedLicense } from './api/baked-license';
-import { insertCopiedScreen } from './api/handoff';
 import { hostedSseUrl, cliCommandFor, copyText } from './api/connection';
 import { mcpClient } from './mcp/websocket-client';
 import type { Settings, License } from '../shared/types';
@@ -19,7 +18,11 @@ type View = 'home' | 'settings';
 
 export function App() {
   const [view, setView] = useState<View>('home');
-  const [settings, setSettings] = useState<Settings>({ apiKey: '', hasApiKey: false, model: DEFAULT_MODEL });
+  const [settings, setSettings] = useState<Settings>({
+    apiKey: '',
+    hasApiKey: false,
+    model: DEFAULT_MODEL,
+  });
   const [license, setLicense] = useState<License | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
@@ -28,8 +31,6 @@ export function App() {
   // Copy-from-web -> insert: paste box open flag, in-flight flag, success banner.
   // Figma's sandbox blocks reading the clipboard, so instead of auto-reading we
   // pop a small input and let the user paste (⌘V) — a manual paste IS allowed.
-  const [pasteOpen, setPasteOpen] = useState(false);
-  const [inserting, setInserting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState<'desktop' | 'cli' | null>(null);
 
@@ -37,20 +38,16 @@ export function App() {
   const hostedUrl = hostedSseUrl(license);
   const cliCommand = cliCommandFor(license);
 
-  const copyToClipboard = useCallback(
-    async (text: string, which: 'desktop' | 'cli') => {
-      const ok = await copyText(text);
-      if (!ok) {
-        setError('Could not reach the clipboard — select the text and copy it manually.');
-        setTimeout(() => setError(null), 6000);
-        return;
-      }
-      setCopied(which);
-      setTimeout(() => setCopied(null), 2000);
-    },
-    []
-  );
-
+  const copyToClipboard = useCallback(async (text: string, which: 'desktop' | 'cli') => {
+    const ok = await copyText(text);
+    if (!ok) {
+      setError('Could not reach the clipboard — select the text and copy it manually.');
+      setTimeout(() => setError(null), 6000);
+      return;
+    }
+    setCopied(which);
+    setTimeout(() => setCopied(null), 2000);
+  }, []);
 
   // Setup event listeners for plugin communication
   useEffect(() => {
@@ -72,11 +69,7 @@ export function App() {
       // always wins; this only fills the gap, and only upward (free -> pro),
       // so re-importing a build can never downgrade or overwrite anyone.
       const baked = readBakedLicense();
-      if (
-        baked &&
-        (!payload.license ||
-          (payload.license.plan !== 'pro' && baked.plan === 'pro'))
-      ) {
+      if (baked && (!payload.license || (payload.license.plan !== 'pro' && baked.plan === 'pro'))) {
         console.log('[Flaude] Activating the licence baked into this download');
         setLicense(baked);
         emit('SAVE_LICENSE', baked);
@@ -105,7 +98,10 @@ export function App() {
   // Collapse/expand handlers
   const handleCollapse = useCallback(() => {
     setIsCollapsed(true);
-    emit('RESIZE_UI', { width: UI_DIMENSIONS.collapsedWidth, height: UI_DIMENSIONS.collapsedHeight });
+    emit('RESIZE_UI', {
+      width: UI_DIMENSIONS.collapsedWidth,
+      height: UI_DIMENSIONS.collapsedHeight,
+    });
   }, []);
 
   const handleExpand = useCallback(() => {
@@ -113,32 +109,12 @@ export function App() {
     emit('RESIZE_UI', { width: UI_DIMENSIONS.width, height: UI_DIMENSIONS.height });
   }, []);
 
-  // Insert a screen the user copied on flaude.app. `pasted` is the text from the
-  // user's ⌘V (Figma won't let us read the clipboard ourselves). We feed it into
-  // the same fetch->rebuild pipeline; handoff.ts throws a toast-ready message at
-  // every failure point, so we just surface it in the existing error banner.
-  const runInsert = useCallback(async (pasted: string) => {
-    setError(null);
-    setNotice(null);
-    setPasteOpen(false);
-    setInserting(true);
-    try {
-      const result = await insertCopiedScreen(async () => pasted);
-      const n = result.nodeIds.length;
-      if (result.ok) {
-        setNotice(`Inserted ${n} editable layer${n === 1 ? '' : 's'} — see your canvas`);
-      } else {
-        const e = result.errors.length;
-        setNotice(`Inserted with ${e} issue${e === 1 ? '' : 's'} — check the new frame`);
-      }
-      setTimeout(() => setNotice(null), 5000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not insert the copied screen.');
-      setTimeout(() => setError(null), 6000);
-    } finally {
-      setInserting(false);
-    }
-  }, []);
+  /* runInsert / insertCopiedScreen DELETED along with the paste box.
+
+     It rebuilt a screen from a JSON pointer the website used to put on the
+     clipboard. The website now copies Figma's OWN clipboard bytes, so Cmd-V on
+     the canvas IS the paste. Keeping a plugin-side reimplementation of paste
+     around meant two paste paths, one of them worse and no longer reachable. */
 
   // Save email to Supabase for community tracking
   useEffect(() => {
@@ -162,7 +138,9 @@ export function App() {
       emit('SAVE_LICENSE', upgraded);
       console.log('[Flaude] MCP token backfilled for existing Pro license');
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [license?.plan, license?.email, license?.mcpToken]);
 
   // Auto-connect the WebSocket whenever we have a Pro license.
@@ -178,8 +156,6 @@ export function App() {
       mcpClient.disconnect();
     }
   }, [license?.plan, license?.email, license?.mcpToken]);
-
-
 
   // === License handlers ===
 
@@ -255,7 +231,16 @@ export function App() {
           }}
           title="Expand plugin"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <polyline points="15 3 21 3 21 9" />
             <polyline points="9 21 3 21 3 15" />
             <line x1="21" y1="3" x2="14" y2="10" />
@@ -298,7 +283,16 @@ export function App() {
             gap: '8px',
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
             <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -323,44 +317,19 @@ export function App() {
             gap: '8px',
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M20 6 9 17l-5-5" />
           </svg>
           {notice}
-        </div>
-      )}
-
-      {/* Paste box (copy -> insert). Figma blocks reading the clipboard, so we
-          let the user paste (⌘V) into this input; onPaste feeds the pipeline. */}
-      {pasteOpen && !inserting && (
-        <div
-          className="fade-in"
-          style={{ margin: '0 16px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}
-        >
-          <input
-            type="text"
-            autoFocus
-            placeholder="Paste your copied screen here (⌘V)"
-            onPaste={(e) => {
-              const text = e.clipboardData?.getData('text') ?? '';
-              if (text) { e.preventDefault(); runInsert(text); }
-            }}
-            onKeyDown={(e) => { if (e.key === 'Escape') setPasteOpen(false); }}
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              padding: '12px 14px',
-              fontSize: '12px',
-              border: '1px solid var(--card-border)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--figma-color-bg)',
-              color: 'var(--figma-color-text)',
-              outline: 'none',
-            }}
-          />
-          <span style={{ fontSize: '11px', color: 'var(--figma-color-text-tertiary)' }}>
-            Hit “Copy to Figma” on a screen at flaude.app, then paste here.
-          </span>
         </div>
       )}
 
@@ -372,11 +341,9 @@ export function App() {
             mcpStatus={mcpStatus}
             hostedUrl={hostedUrl}
             cliCommand={cliCommand}
-            inserting={inserting}
             copied={copied}
             onSaveEmail={handleActivateLicense}
             onOpenSettings={() => setView('settings')}
-            onPaste={() => { setError(null); setNotice(null); setPasteOpen((v) => !v); }}
             onCopy={copyToClipboard}
           />
         )}

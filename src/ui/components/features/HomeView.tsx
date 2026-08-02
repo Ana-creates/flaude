@@ -28,22 +28,15 @@ import type { License } from '../../../shared/types';
  *   pro  — connection status, the URL to paste into Claude, and a thank-you.
  */
 
-type MCPStatus =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'error'
-  | 'auth_failed';
+type MCPStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'auth_failed';
 
 interface HomeViewProps {
   license: License | null;
   mcpStatus: MCPStatus;
   hostedUrl: string;
   cliCommand: string;
-  inserting: boolean;
   onSaveEmail: (email: string) => void;
   onOpenSettings: () => void;
-  onPaste: () => void;
   onCopy: (text: string, which: 'desktop' | 'cli') => void;
   copied: 'desktop' | 'cli' | null;
 }
@@ -53,10 +46,8 @@ export function HomeView({
   mcpStatus,
   hostedUrl,
   cliCommand,
-  inserting,
   onSaveEmail,
   onOpenSettings,
-  onPaste,
   onCopy,
   copied,
 }: HomeViewProps) {
@@ -89,10 +80,10 @@ export function HomeView({
   const caption = isTrialling(license)
     ? 'Your trial is live. Claude is wired straight into this file.'
     : isPro
-    ? 'Thanks for subscribing. Claude is wired straight into this file.'
-    : hasEmail
-      ? 'Connect Claude to this file through your local MCP server.'
-      : 'Your email connects this file to Claude. Nothing else to install.';
+      ? 'Thanks for subscribing. Claude is wired straight into this file.'
+      : hasEmail
+        ? 'Connect Claude to this file through your local MCP server.'
+        : /* unused while signed out - the cover is artwork only there */ '';
 
   return (
     <div
@@ -108,40 +99,76 @@ export function HomeView({
       <PlanCover
         license={license}
         caption={caption}
+        plain={!hasEmail}
         onSettings={hasEmail ? onOpenSettings : undefined}
       />
 
       {!hasEmail && (
         <Section title="Get connected">
           <p style={hint}>
-            Use the address you bought Flaude with, or any address if you have
-            not yet — it works free.
+            Use the address you bought Flaude with, or any address if you have not yet. It works
+            free.
           </p>
-          <input
-            type="email"
-            value={email}
-            autoFocus
-            placeholder="you@studio.com"
-            onInput={(e) => {
-              setEmail((e.target as HTMLInputElement).value);
-              setEmailError('');
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submitEmail();
-            }}
-            style={field}
-          />
-          <button
-            onClick={submitEmail}
-            disabled={saving || !email.trim()}
+
+          {/* ONE PILL, input and button sharing a single dark capsule.
+
+              This is the founder's original form, restored. A stacked
+              field-then-button pair is the generic web-signup shape and it made
+              a two-field-looking form out of one question; the capsule reads as
+              a single control, which is what it is. The divider is the only
+              thing separating them. */}
+          <div
             style={{
-              ...primaryButton,
-              opacity: saving || !email.trim() ? 0.45 : 1,
-              cursor: saving || !email.trim() ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              borderRadius: 'var(--radius-full)',
+              background: 'linear-gradient(135deg, #1a1a1a 0%, #333333 100%)',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+              overflow: 'hidden',
             }}
           >
-            {saving ? 'Checking…' : 'Continue'}
-          </button>
+            <input
+              type="email"
+              value={email}
+              autoFocus
+              placeholder="your@email.com"
+              onInput={(e) => {
+                setEmail((e.target as HTMLInputElement).value);
+                setEmailError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitEmail();
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '13px 16px',
+                fontSize: '13px',
+                border: 'none',
+                background: 'transparent',
+                color: '#ffffff',
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={submitEmail}
+              disabled={saving || !email.trim()}
+              style={{
+                padding: '13px 18px',
+                fontSize: '13px',
+                fontWeight: 600,
+                border: 'none',
+                borderLeft: '1px solid rgba(255,255,255,0.15)',
+                background: 'transparent',
+                color: saving || !email.trim() ? 'rgba(255,255,255,0.35)' : '#ffffff',
+                cursor: saving || !email.trim() ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {saving ? '…' : 'Get Started'}
+            </button>
+          </div>
           {emailError && <p style={errorText}>{emailError}</p>}
         </Section>
       )}
@@ -151,17 +178,15 @@ export function HomeView({
           <Section title="Claude connection">
             <StatusRow status={mcpStatus} />
             <p style={hint}>
-              Paste this once into Claude → Settings → Connectors → Add custom
-              connector, then restart Claude.
+              Paste this once into Claude → Settings → Connectors → Add custom connector, then
+              restart Claude.
             </p>
             <button
               onClick={() => onCopy(hostedUrl, 'desktop')}
               style={{
                 ...primaryButton,
                 background:
-                  copied === 'desktop'
-                    ? 'var(--color-success)'
-                    : primaryButton.background,
+                  copied === 'desktop' ? 'var(--color-success)' : primaryButton.background,
               }}
             >
               {copied === 'desktop' ? '✓ Copied' : 'Copy connection URL'}
@@ -172,7 +197,6 @@ export function HomeView({
                 : 'Using Claude Code? Copy the CLI command'}
             </button>
           </Section>
-          <PasteSection onPaste={onPaste} inserting={inserting} />
         </Fragment>
       )}
 
@@ -181,15 +205,13 @@ export function HomeView({
           <Section title="Claude connection">
             <MCPConnection license={license} />
           </Section>
-          <PasteSection onPaste={onPaste} inserting={inserting} />
           <button onClick={onOpenSettings} style={upsell}>
             <span style={{ fontWeight: 600 }}>Skip the local server</span>
             <span style={{ opacity: 0.7 }}>
               {/* No price. See the note in SettingsView — a number baked into
                   a shipped plugin binary cannot be corrected without a
                   re-release. */}
-              Pro is one URL pasted into Claude — nothing to run on your
-              machine.
+              Pro is one URL pasted into Claude. Nothing to run on your machine.
             </span>
           </button>
         </Fragment>
@@ -199,13 +221,7 @@ export function HomeView({
 }
 
 /** A titled group. The plugin is 400px wide; cards inside cards read as noise. */
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: preact.ComponentChildren;
-}) {
+function Section({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div
@@ -224,29 +240,19 @@ function Section({
   );
 }
 
-function PasteSection({
-  onPaste,
-  inserting,
-}: {
-  onPaste: () => void;
-  inserting: boolean;
-}) {
-  return (
-    <Section title="From the gallery">
-      <button
-        onClick={onPaste}
-        disabled={inserting}
-        style={{
-          ...secondaryButton,
-          cursor: inserting ? 'wait' : 'pointer',
-          opacity: inserting ? 0.5 : 1,
-        }}
-      >
-        {inserting ? 'Inserting…' : 'Paste a screen from flaude.app'}
-      </button>
-    </Section>
-  );
-}
+/* PasteSection DELETED.
+
+   There was a "Paste a screen from flaude.app" button here, backed by a paste
+   box in App.tsx. It described a workflow that does not exist: copying a screen
+   on flaude.app puts FIGMA'S OWN clipboard bytes on your clipboard (see
+   CopyToFigmaButton -> fetchFigmaClipboard on the website), so you switch to
+   Figma and press Cmd-V. That is the whole flow. No plugin involved, and
+   certainly not "paste the thing you copied into a text field inside a plugin
+   so the plugin can paste it for you".
+
+   It survived from an older JSON-pointer handoff that needed the plugin to
+   rebuild a screen from a slug. The faithful clipboard path replaced it, and
+   this button was left pointing at the dead one. */
 
 /**
  * The connection, stated plainly.
@@ -265,11 +271,11 @@ function StatusRow({ status }: { status: MCPStatus }) {
     },
     error: {
       color: '#ef4444',
-      text: 'Connection dropped — it will retry on its own',
+      text: 'Connection dropped. It will retry on its own',
     },
     auth_failed: {
       color: '#ef4444',
-      text: 'Subscription not recognised — re-activate in Settings',
+      text: 'Subscription not recognised. Re-activate in Settings',
     },
   };
   const { color, text } = map[status];
@@ -293,8 +299,7 @@ function StatusRow({ status }: { status: MCPStatus }) {
           borderRadius: '50%',
           backgroundColor: color,
           flexShrink: 0,
-          animation:
-            status === 'connecting' ? 'pulse 1.6s ease-in-out infinite' : 'none',
+          animation: status === 'connecting' ? 'pulse 1.6s ease-in-out infinite' : 'none',
         }}
       />
       {text}
