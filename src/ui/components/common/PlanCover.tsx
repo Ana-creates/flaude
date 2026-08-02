@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import type { License } from '../../../shared/types';
 import coverUrl from '../../assets/cover-dock.jpg';
-import shopUrl from '../../assets/cover-shop.jpg';
+import welcomeUrl from '../../assets/cover-welcome.jpg';
 
 /**
  * The plugin's one piece of artwork, and the only place it states who you are.
@@ -65,22 +65,15 @@ export function planLabel(license: License | null): string {
 interface PlanCoverProps {
   license: License | null;
   /**
-   * Before the user has told us who they are, the cover is a DIFFERENT image
-   * and carries no badge.
+   * Before the user has told us who they are, the cover is the founder's
+   * "Welcome to Flaude" artwork, used exactly as supplied.
    *
-   * It used to be the same dock artwork as the signed-in state with a "Free"
-   * pill on it. Two problems in one. The badge was a claim about an account
-   * that does not exist yet - nobody has signed in, so the plugin cannot know
-   * whether they are free, trialling, or a lifetime customer about to type the
-   * address they bought with; greeting that person with "Free" is both untrue
-   * and a downgrade in the one moment they are deciding whether to hand over
-   * an email. And reusing one image for first run and steady state meant
-   * connecting your account changed nothing visible: the reward for the only
-   * action on the page was the same picture you were already looking at.
-   *
-   * So first run gets the flower shop with the Flaude mark at its centre - the
-   * brand, and nothing claimed - and the Claude-to-Figma dock arrives when the
-   * connection does.
+   * Two earlier attempts were wrong. The first reused the signed-in dock art
+   * with a "Free" pill: a claim about an account that does not exist yet, and
+   * it meant connecting - the only action on the page - changed nothing
+   * visible. The second was me compositing a logo onto a background and
+   * dimming it, which is not my call to make on someone else's art. This one
+   * already has the mark wired in. It is resized and nothing else.
    */
   plain?: boolean;
   /**
@@ -103,14 +96,17 @@ export function PlanCover({ license, plain = false, onCollapse }: PlanCoverProps
     <div
       style={{
         position: 'relative',
-        aspectRatio: '880 / 543',
+        // Each cover keeps ITS OWN ratio. One shared ratio meant whichever
+        // image did not match got cropped by background-size: cover, which is
+        // how the welcome art lost its edges last time.
+        aspectRatio: plain ? '4261 / 2150' : '880 / 543',
         // The parent is a flex column; without this the cover is squeezed
         // shorter on the states that have more content below it, so the
         // artwork changed height depending on your plan.
         flexShrink: 0,
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
-        background: `url(${plain ? shopUrl : coverUrl}) center/cover no-repeat`,
+        background: `url(${plain ? welcomeUrl : coverUrl}) center/cover no-repeat`,
       }}
     >
       {onCollapse && (

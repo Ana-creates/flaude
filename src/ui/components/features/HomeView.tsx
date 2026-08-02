@@ -1,6 +1,7 @@
 import { h, Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import { PlanCover } from '../common/PlanCover';
+import welcomeUrl from '../../assets/cover-welcome.jpg';
 import { MCPConnection } from './MCPConnection';
 import { saveUserEmail, FLAUDE_PRICING_URL } from '../../api/supabase';
 import type { License } from '../../../shared/types';
@@ -85,26 +86,103 @@ export function HomeView({
   return (
     <div
       style={{
+        position: 'relative',
         height: '100%',
         overflowY: 'auto',
-        padding: '12px',
+        boxSizing: 'border-box',
+        padding: '14px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '14px',
+        gap: '18px',
       }}
     >
-      <PlanCover
-        license={license}
-        plain={!hasEmail}
-        onCollapse={mcpStatus === 'connected' ? onCollapse : undefined}
-      />
+      {/* FULL BLEED on first run.
+
+          The welcome art is a 1.98:1 strip. Dropped into a card at the top of
+          a 380x560 panel it stood 178px tall, "Welcome to Flaude" shrank to
+          unreadable, and the ~300px of white left underneath read as a page
+          still loading. Letting it fill the panel crops the outer app icons
+          but keeps the whole centre - the dock, the mark, the wordmark - at a
+          size where the composition actually works, and there is no void left
+          to explain.
+
+          Only here. Once you are connected the art goes back to being a card,
+          because from then on the page has content that matters more. */}
+      {!hasEmail && (
+        <Fragment>
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: `url(${welcomeUrl}) center/cover no-repeat`,
+            }}
+          />
+          {/* Scrim at the foot only, so the capsule and its label sit on
+              something quiet without flattening the flowers above them. */}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background:
+                'linear-gradient(to top, rgba(255,255,255,0.97) 0%, rgba(255,255,255,0.90) 26%, rgba(255,255,255,0) 52%)',
+            }}
+          />
+        </Fragment>
+      )}
+
+      {hasEmail && (
+        <PlanCover
+          license={license}
+          onCollapse={mcpStatus === 'connected' ? onCollapse : undefined}
+        />
+      )}
 
       {!hasEmail && (
-        <Section title="Get connected">
-          <p style={hint}>
-            Use the address you bought Flaude with, or any address if you have not yet. It works
-            free.
-          </p>
+        /* CENTRED, AND PUSHED DOWN.
+
+           The heading sat hard left at 16px above a 12px grey paragraph and a
+           capsule, all crammed under the art - three left edges and no air, in
+           a panel that is mostly empty below them. The cover is a centred
+           composition with "Welcome to Flaude" on its own axis, so anything
+           left-aligned underneath fights it.
+
+           marginTop:auto puts the form at the FOOT of whatever height Figma
+           gives the panel rather than floating mid-air under the picture. */
+        <div
+          style={{
+            // Centred in the space the art leaves, not glued to the floor.
+            // The welcome cover is a wide strip; bottom-pinning the form left
+            // a ~300px void between them that read as a loading state.
+            position: 'relative',
+            marginTop: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '14px',
+            padding: '0 4px 4px',
+            textAlign: 'center',
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '19px',
+                // Regular, not 600. Fraunces is a high-contrast serif; at
+                // semibold in a 380px panel its thick strokes go heavy and
+                // the word reads as a warning label.
+                fontWeight: 400,
+                letterSpacing: '-0.01em',
+                color: 'var(--figma-color-text)',
+              }}
+            >
+              Get connected
+            </div>
+            <p style={{ ...hint, marginTop: '7px', maxWidth: '300px' }}>
+              Use the address you bought Flaude with, or any address if you have not yet. It works
+              free.
+            </p>
+          </div>
 
           {/* ONE PILL, input and button sharing a single dark capsule.
 
@@ -119,7 +197,7 @@ export function HomeView({
               width: '100%',
               borderRadius: 'var(--radius-full)',
               background: INK,
-              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
               overflow: 'hidden',
             }}
           >
@@ -138,7 +216,7 @@ export function HomeView({
               style={{
                 flex: 1,
                 minWidth: 0,
-                padding: '13px 16px',
+                padding: '13px 18px',
                 fontSize: '13px',
                 border: 'none',
                 background: 'transparent',
@@ -165,7 +243,7 @@ export function HomeView({
             </button>
           </div>
           {emailError && <p style={errorText}>{emailError}</p>}
-        </Section>
+        </div>
       )}
 
       {hasEmail && isPro && (
@@ -257,12 +335,12 @@ export function HomeView({
  */
 function Section({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div
         style={{
           fontFamily: 'var(--font-display)',
-          fontSize: '16px',
-          fontWeight: 600,
+          fontSize: '17px',
+          fontWeight: 400,
           letterSpacing: '-0.01em',
           color: 'var(--figma-color-text)',
         }}
