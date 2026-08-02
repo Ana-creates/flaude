@@ -1,7 +1,6 @@
 import { h } from 'preact';
 import type { License } from '../../../shared/types';
 import coverUrl from '../../assets/cover-dock.jpg';
-import welcomeUrl from '../../assets/cover-welcome.jpg';
 
 /**
  * The plugin's one piece of artwork, and the only place it states who you are.
@@ -64,18 +63,10 @@ export function planLabel(license: License | null): string {
 
 interface PlanCoverProps {
   license: License | null;
-  /**
-   * Before the user has told us who they are, the cover is the founder's
-   * "Welcome to Flaude" artwork, used exactly as supplied.
-   *
-   * Two earlier attempts were wrong. The first reused the signed-in dock art
-   * with a "Free" pill: a claim about an account that does not exist yet, and
-   * it meant connecting - the only action on the page - changed nothing
-   * visible. The second was me compositing a logo onto a background and
-   * dimming it, which is not my call to make on someone else's art. This one
-   * already has the mark wired in. It is resized and nothing else.
-   */
-  plain?: boolean;
+  /* `plain` DELETED. PlanCover is now rendered only once there IS an
+     account, so every branch that hedged about not having one was dead: the
+     signed-out welcome art is drawn full-bleed by HomeView, which is the only
+     way its portrait composition survives a 380px panel. */
   /**
    * Shrink the panel to a status strip. This is the gear's old corner.
    *
@@ -88,7 +79,7 @@ interface PlanCoverProps {
   onCollapse?: () => void;
 }
 
-export function PlanCover({ license, plain = false, onCollapse }: PlanCoverProps) {
+export function PlanCover({ license, onCollapse }: PlanCoverProps) {
   const isPro = license?.plan === 'pro';
   const label = planLabel(license);
 
@@ -99,14 +90,14 @@ export function PlanCover({ license, plain = false, onCollapse }: PlanCoverProps
         // Each cover keeps ITS OWN ratio. One shared ratio meant whichever
         // image did not match got cropped by background-size: cover, which is
         // how the welcome art lost its edges last time.
-        aspectRatio: plain ? '4261 / 2150' : '880 / 543',
+        aspectRatio: '880 / 543',
         // The parent is a flex column; without this the cover is squeezed
         // shorter on the states that have more content below it, so the
         // artwork changed height depending on your plan.
         flexShrink: 0,
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
-        background: `url(${plain ? welcomeUrl : coverUrl}) center/cover no-repeat`,
+        background: `url(${coverUrl}) center/cover no-repeat`,
       }}
     >
       {onCollapse && (
@@ -164,40 +155,38 @@ export function PlanCover({ license, plain = false, onCollapse }: PlanCoverProps
           with clear sky above it, so a centred plate sits in the one place the
           image leaves empty. Bottom-left needed a scrim across the whole foot
           of the picture to stay legible, which flattened the flowers. */}
-      {!plain && (
+      <div
+        style={{
+          position: 'absolute',
+          top: '12px',
+          left: 0,
+          right: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}
+      >
         <div
           style={{
-            position: 'absolute',
-            top: '12px',
-            left: 0,
-            right: 0,
-            display: 'flex',
-            justifyContent: 'center',
-            pointerEvents: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 12px',
+            borderRadius: 'var(--radius-full)',
+            fontSize: '11px',
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            color: '#ffffff',
+            background: isPro ? 'rgba(255,255,255,0.24)' : 'rgba(10,14,40,0.42)',
+            border: '1px solid rgba(255,255,255,0.4)',
+            backdropFilter: 'blur(10px)',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
           }}
         >
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '5px 12px',
-              borderRadius: 'var(--radius-full)',
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              color: '#ffffff',
-              background: isPro ? 'rgba(255,255,255,0.24)' : 'rgba(10,14,40,0.42)',
-              border: '1px solid rgba(255,255,255,0.4)',
-              backdropFilter: 'blur(10px)',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
-            }}
-          >
-            {label}
-          </div>
+          {label}
         </div>
-      )}
+      </div>
     </div>
   );
 }

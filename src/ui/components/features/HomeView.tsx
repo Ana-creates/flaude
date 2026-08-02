@@ -124,7 +124,12 @@ export function HomeView({
               position: 'absolute',
               inset: 0,
               background:
-                'linear-gradient(to top, rgba(255,255,255,0.97) 0%, rgba(255,255,255,0.90) 26%, rgba(255,255,255,0) 52%)',
+                // Stops BELOW the wordmark. At 52% the fade reached up into
+                // "Flaude" and washed the founder's own type to half strength
+                // - the scrim exists to make the form legible, not to edit the
+                // artwork. The form's top edge sits at ~28% from the floor, so
+                // the veil is gone by 38%.
+                'linear-gradient(to top, rgba(255,255,255,0.97) 0%, rgba(255,255,255,0.93) 22%, rgba(255,255,255,0) 38%)',
             }}
           />
         </Fragment>
