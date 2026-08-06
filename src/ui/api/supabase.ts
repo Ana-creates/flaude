@@ -4,8 +4,6 @@
  *   - `Subscription` / `User` / `Order` tables (Pro subscriptions, managed by flaude-website / Prisma)
  */
 
-import { WEBSITE_BASE_URL } from './handoff';
-
 const SUPABASE_URL = 'https://tmuevunmxwmrmluxzayd.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtdWV2dW5teHdtcm1sdXh6YXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODQ3NzAsImV4cCI6MjA5MTA2MDc3MH0.orAhD15AB3F-Xub2on7kJNiBMdjyJKtWB6LBIS8lMjI';
@@ -110,7 +108,11 @@ export async function checkProSubscription(email: string): Promise<ProStatus> {
     // The API answers the single question this screen needs and returns only
     // the three fields below, so the table can now be locked down.
     const response = await fetch(
-      `${WEBSITE_BASE_URL}/api/entitlement?email=${encodeURIComponent(normalized)}`,
+      // www, NOT the bare WEBSITE_BASE_URL: flaude.app 307-redirects to
+      // www.flaude.app, and a cross-origin redirect from a null-origin iframe
+      // is one more thing that can fail silently and downgrade a paying user
+      // to free. Ask the canonical host directly.
+      `https://www.flaude.app/api/entitlement?email=${encodeURIComponent(normalized)}`,
       { method: 'GET', signal: AbortSignal.timeout(10000) }
     );
 
