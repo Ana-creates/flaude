@@ -4,6 +4,8 @@
  *   - `Subscription` / `User` / `Order` tables (Pro subscriptions, managed by flaude-website / Prisma)
  */
 
+import { WEBSITE_BASE_URL } from './handoff';
+
 const SUPABASE_URL = 'https://tmuevunmxwmrmluxzayd.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtdWV2dW5teHdtcm1sdXh6YXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODQ3NzAsImV4cCI6MjA5MTA2MDc3MH0.orAhD15AB3F-Xub2on7kJNiBMdjyJKtWB6LBIS8lMjI';
@@ -97,18 +99,19 @@ export async function checkProSubscription(email: string): Promise<ProStatus> {
   if (cached && Date.now() < cached.expiry) return stripExpiry(cached);
 
   try {
+    // flaude.app, NOT Supabase directly.
+    //
+    // This used to hit /rest/v1/Subscription with the public anon key. That
+    // forced the Subscription table to stay readable by anon - the one table
+    // that could not have row-level security enabled - which meant anybody
+    // holding the anon key (it ships in the website's own JS) could list every
+    // customer email, plan and amount in the database.
+    //
+    // The API answers the single question this screen needs and returns only
+    // the three fields below, so the table can now be locked down.
     const response = await fetch(
-      `${SUBSCRIPTION_SUPABASE_URL}/rest/v1/Subscription?email=eq.${encodeURIComponent(
-        normalized
-      )}&status=eq.active&select=currentPeriodEnd,interval,trialEndsAt&order=currentPeriodEnd.desc&limit=1`,
-      {
-        method: 'GET',
-        headers: {
-          apikey: SUBSCRIPTION_SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${SUBSCRIPTION_SUPABASE_ANON_KEY}`,
-        },
-        signal: AbortSignal.timeout(10000),
-      }
+      `${WEBSITE_BASE_URL}/api/entitlement?email=${encodeURIComponent(normalized)}`,
+      { method: 'GET', signal: AbortSignal.timeout(10000) }
     );
 
     if (!response.ok) {
@@ -116,22 +119,24 @@ export async function checkProSubscription(email: string): Promise<ProStatus> {
       return cached ? stripExpiry(cached) : FREE;
     }
 
-    const data = (await response.json()) as {
-      currentPeriodEnd: string;
-      interval: string | null;
-      trialEndsAt: string | null;
-    }[];
+    // An object now, not a PostgREST array: the API returns the resolved
+    // answer rather than a raw row to be interpreted here.
+    const row = (await response.json()) as {
+      plan?: 'pro' | 'free';
+      currentPeriodEnd?: string;
+      interval?: string | null;
+      trialEndsAt?: string | null;
+    };
     let status: ProStatus = FREE;
 
-    const row = data[0];
-    if (row?.currentPeriodEnd) {
+    if (row?.plan === 'pro' && row.currentPeriodEnd) {
       const periodEnd = new Date(row.currentPeriodEnd);
       if (!isNaN(periodEnd.getTime()) && periodEnd > new Date()) {
         const trialEndsAt = row.trialEndsAt ? new Date(row.trialEndsAt) : null;
         status = {
           isPro: true,
           currentPeriodEnd: periodEnd,
-          interval: normalizeInterval(row.interval),
+          interval: normalizeInterval(row.interval ?? null),
           // A trial whose end date has passed is not a trial any more; the row
           // is simply not cleaned up until the renewal webhook lands.
           trialEndsAt:
