@@ -16,7 +16,20 @@ import type { License } from '../../shared/types';
 const LOCAL_WS_URL = 'ws://localhost:9876';
 const HOSTED_WS_URL = 'wss://flaude-pro-mcp.fly.dev/plugin';
 const RECONNECT_INTERVAL = 3000;
-const MAX_RECONNECT_ATTEMPTS = 10;
+/**
+ * Retry ceiling, in milliseconds between attempts.
+ *
+ * There used to be MAX_RECONNECT_ATTEMPTS = 10 at a flat 3s, so the client gave
+ * up 30 SECONDS after a drop and then sat on "Not connected yet" forever, with
+ * no way back except closing and reopening the plugin. Thirty seconds is
+ * shorter than a lunch break, a laptop sleeping, a wifi handover, or a relay
+ * redeploy - so the normal state of a plugin left open all day was
+ * disconnected, which is exactly what it looked like.
+ *
+ * Now it never stops trying; it just backs off, so an unreachable relay costs a
+ * request every 30s instead of one every 3s.
+ */
+const MAX_RECONNECT_INTERVAL = 30000;
 
 interface MCPCommand {
   requestId: string;
@@ -44,6 +57,7 @@ type StatusChangeCallback = (status: ConnectionStatus, message?: string) => void
 class MCPWebSocketClient {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingRequests = new Map<string, {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
@@ -56,6 +70,34 @@ class MCPWebSocketClient {
   constructor() {
     // Listen for results from plugin
     on('MCP_TOOL_RESULT', this.handlePluginResult.bind(this));
+
+    /**
+     * Reconnect the moment the user comes back, instead of waiting out the
+     * backoff.
+     *
+     * The common way this connection dies is not a server fault: the laptop
+     * sleeps, or Figma sits in a background tab where browsers throttle timers
+     * heavily, so the retry that should have fired never did. The user then
+     * returns to a panel that says "Not connected yet" and has no reason to
+     * believe it will fix itself.
+     *
+     * Focus and `online` are the two moments we know a human is back and the
+     * network is up, so both retry immediately. Guarded on isManuallyDisconnected
+     * so this never fights a user who deliberately disconnected, and on
+     * readyState so an already-healthy socket is left alone.
+     */
+    if (typeof window !== 'undefined') {
+      const wake = () => {
+        if (this.isManuallyDisconnected) return;
+        if (this.ws?.readyState === WebSocket.OPEN) return;
+        if (!this.license?.email) return;
+        // Reset so the retry starts at 3s rather than resuming a long backoff.
+        this.reconnectAttempts = 0;
+        this.connect();
+      };
+      window.addEventListener('focus', wake);
+      window.addEventListener('online', wake);
+    }
   }
 
   /**
@@ -161,10 +203,18 @@ class MCPWebSocketClient {
         this.rejectPendingRequests('Connection lost');
         this.notifyStatus('disconnected');
 
-        if (!this.isManuallyDisconnected && this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        if (!this.isManuallyDisconnected) {
           this.reconnectAttempts++;
-          console.log(`[MCP Client] Reconnecting in ${RECONNECT_INTERVAL}ms (attempt ${this.reconnectAttempts})`);
-          setTimeout(() => this.connect(), RECONNECT_INTERVAL);
+          // Exponential backoff, capped. No attempt limit: the only reason to
+          // stop retrying is the user disconnecting, and that sets the flag
+          // above. reconnectAttempts is reset on successful auth, so a healthy
+          // session always starts its next outage at 3s.
+          const delay = Math.min(
+            RECONNECT_INTERVAL * 2 ** (this.reconnectAttempts - 1),
+            MAX_RECONNECT_INTERVAL
+          );
+          console.log(`[MCP Client] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+          this.reconnectTimer = setTimeout(() => this.connect(), delay);
         }
       };
 
@@ -213,6 +263,12 @@ class MCPWebSocketClient {
 
   disconnect() {
     this.isManuallyDisconnected = true;
+    // A pending retry would otherwise reconnect seconds after a deliberate
+    // disconnect, which reads as the toggle not working.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.ws?.close();
     this.ws = null;
     this.rejectPendingRequests('Disconnected');

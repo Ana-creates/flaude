@@ -495,13 +495,17 @@ function StatusRow({ status }: { status: MCPStatus }) {
       color: 'var(--figma-color-text-tertiary)',
       halo: 'rgba(120, 120, 120, 0.18)',
       tint: 'var(--figma-color-bg-secondary)',
-      text: 'Not connected yet',
+      // Not "Not connected yet". For a Pro user the socket dials itself, so
+      // this state is a transient outage, not a setup step the user skipped.
+      // The old wording sent people back to re-paste a connection URL that was
+      // already correct, to fix something that was already retrying.
+      text: 'Reconnecting…',
     },
     error: {
       color: '#ef4444',
       halo: 'rgba(239, 68, 68, 0.22)',
       tint: 'rgba(239, 68, 68, 0.09)',
-      text: 'Connection dropped. It will retry on its own',
+      text: 'Connection dropped. Retrying…',
     },
     auth_failed: {
       color: '#ef4444',
